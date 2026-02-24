@@ -1,0 +1,22 @@
+[gd_scene load_steps=6 format=3 uid="uid://t3stsc3n3d1"]
+
+[ext_resource type="Script" uid="uid://t3stsc0p3n0" path="res://Scripts/Tests/TestBattleScope.cs" id="1_testscope"]
+[ext_resource type="Script" uid="uid://t3stgshost1" path="res://Scripts/Tests/TestGameStateHost.cs" id="2_gshost"]
+[ext_resource type="Script" uid="uid://t3stmaphost" path="res://Scripts/Tests/TestMapHost.cs" id="3_maphost"]
+[ext_resource type="Script" uid="uid://t3stbtlhost" path="res://Scripts/Tests/TestBattleHost.cs" id="4_btlhost"]
+[ext_resource type="Script" uid="uid://d1t3st3rn0d" path="res://Scripts/Tests/DIIntegrationTest.cs" id="5_testuser"]
+
+[node name="TestScene" type="Node"]
+script = ExtResource("1_testscope")
+
+[node name="TestGameStateHost" type="Node" parent="."]
+script = ExtResource("2_gshost")
+
+[node name="TestMapHost" type="Node" parent="."]
+script = ExtResource("3_maphost")
+
+[node name="TestBattleHost" type="Node" parent="."]
+script = ExtResource("4_btlhost")
+
+[node name="DIIntegrationTest" type="Node" parent="."]
+script = ExtResource("5_testuser")

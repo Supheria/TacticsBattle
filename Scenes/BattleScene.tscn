@@ -1,0 +1,30 @@
+[gd_scene load_steps=8 format=3 uid="uid://b3at1l3sc3n3"]
+
+[ext_resource type="Script" uid="uid://dk57hqg8wpc3s" path="res://Scripts/Scope/BattleScope.cs" id="1_scope"]
+[ext_resource type="Script" uid="uid://cc2wan4ik7lj7" path="res://Scripts/Hosts/GameStateHost.cs" id="2_gshost"]
+[ext_resource type="Script" uid="uid://cttkuw2xkklya" path="res://Scripts/Hosts/MapHost.cs" id="3_maphost"]
+[ext_resource type="Script" uid="uid://bqxuigs8aqac4" path="res://Scripts/Hosts/BattleHost.cs" id="4_battlehost"]
+[ext_resource type="Script" uid="uid://8vmrx7xbymel" path="res://Scripts/Users/UnitManager.cs" id="5_unitmgr"]
+[ext_resource type="Script" uid="uid://dxhdfk0aip8mu" path="res://Scripts/Users/BattleUI.cs" id="6_battleui"]
+[ext_resource type="Script" uid="uid://23hdujajrpc3" path="res://Scripts/Users/AIController.cs" id="7_ai"]
+
+[node name="BattleScene" type="Node"]
+script = ExtResource("1_scope")
+
+[node name="GameStateHost" type="Node" parent="."]
+script = ExtResource("2_gshost")
+
+[node name="MapHost" type="Node" parent="."]
+script = ExtResource("3_maphost")
+
+[node name="BattleHost" type="Node" parent="."]
+script = ExtResource("4_battlehost")
+
+[node name="UnitManager" type="Node" parent="."]
+script = ExtResource("5_unitmgr")
+
+[node name="BattleUI" type="CanvasLayer" parent="."]
+script = ExtResource("6_battleui")
+
+[node name="AIController" type="Node" parent="."]
+script = ExtResource("7_ai")
