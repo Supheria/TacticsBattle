@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Godot;
+using GodotEnv = Godot.Environment;
 using GodotSharpDI.Abstractions;
 using TacticsBattle.Models;
 using TacticsBattle.Services;
@@ -29,6 +30,7 @@ public sealed partial class BattleRenderer3D : Node3D, IDependenciesResolved
     [Inject] private IMapService?         _mapService;
     [Inject] private IBattleService?      _battleService;
     [Inject] private ILevelRegistryService? _levelConfig;
+    [Inject] private TacticsBattle.Audio.IAudioService? _audio;
 
     public override partial void _Notification(int what);
 
@@ -83,6 +85,10 @@ public sealed partial class BattleRenderer3D : Node3D, IDependenciesResolved
     void IDependenciesResolved.OnDependenciesResolved(bool ok)
     {
         if (!ok) { GD.PrintErr("[Renderer3D] DI failed."); return; }
+        // Subscribe to events immediately — before UnitManager fires BeginPlayerTurn
+        // on the same frame. If we deferred to _Process, any death-event from Turn-1
+        // ProcessTurnStart would be missed.
+        SubscribeEvents();
         _diReady = true;
     }
 
@@ -95,6 +101,8 @@ public sealed partial class BattleRenderer3D : Node3D, IDependenciesResolved
     //  World construction
     // ─────────────────────────────────────────────────────────────────────────
 
+    private bool _eventsSubscribed = false;
+
     private void BuildWorld()
     {
         SetupCamera();
@@ -102,7 +110,9 @@ public sealed partial class BattleRenderer3D : Node3D, IDependenciesResolved
         SetupEnvironment();
         BuildTileGrid();
         foreach (var u in _gameState!.AllUnits) EnsureUnitVisual(u);
-        SubscribeEvents();
+        // SubscribeEvents was already called in OnDependenciesResolved to avoid
+        // missing events that fire before _Process runs. Don't subscribe twice.
+        if (!_eventsSubscribed) SubscribeEvents();
     }
 
     private void SetupCamera()
@@ -124,11 +134,11 @@ public sealed partial class BattleRenderer3D : Node3D, IDependenciesResolved
 
     private void SetupEnvironment()
     {
-        var env = new Godot.Environment();
-        env.AmbientLightSource = Godot.Environment.AmbientSource.Color;
+        var env = new GodotEnv();
+        env.AmbientLightSource = GodotEnv.AmbientSource.Color;
         env.AmbientLightColor  = new Color(0.55f, 0.65f, 0.80f);
         env.AmbientLightEnergy = 0.55f;
-        env.BackgroundMode     = Godot.Environment.BGMode.Color;
+        env.BackgroundMode     = GodotEnv.BGMode.Color;
         env.BackgroundColor    = new Color(0.35f, 0.52f, 0.80f);
         AddChild(new WorldEnvironment { Environment = env });
     }
@@ -169,6 +179,8 @@ public sealed partial class BattleRenderer3D : Node3D, IDependenciesResolved
 
     private void SubscribeEvents()
     {
+        if (_eventsSubscribed) return;
+        _eventsSubscribed = true;
         _gameState!.OnTurnStarted += _ =>
         {
             foreach (var u in _gameState.AllUnits) EnsureUnitVisual(u);
@@ -253,6 +265,29 @@ public sealed partial class BattleRenderer3D : Node3D, IDependenciesResolved
             _gameState.SelectedUnit = null;
             _selMode = SelMode.None;
         };
+
+        _battleService.OnStatusApplied += (unit, _) =>
+        {
+            RefreshHpBar(unit);       // HP may have changed (poison tick)
+            SyncStatusIndicators(unit);
+        };
+
+        _battleService.OnStatusTick += (unit, _, _) =>
+        {
+            RefreshHpBar(unit);
+            SyncStatusIndicators(unit);
+        };
+
+        _battleService.OnAuraHeal += (_, ally, _) => RefreshHpBar(ally);
+
+        _battleService.OnCounterDamage += (unit, _) =>
+        {
+            RefreshHpBar(unit);
+            if (!unit.IsAlive) return;
+            SyncStatusIndicators(unit);
+        };
+
+        _battleService.OnUnitPushed += (unit, _) => SyncUnitWorldPos(unit);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -520,6 +555,41 @@ public sealed partial class BattleRenderer3D : Node3D, IDependenciesResolved
     // ─────────────────────────────────────────────────────────────────────────
     //  Inner records
     // ─────────────────────────────────────────────────────────────────────────
+
+    // ── Status indicator orbs ─────────────────────────────────────────────────
+
+    private void SyncStatusIndicators(Unit unit)
+    {
+        if (!_unitVis.TryGetValue(unit.Id, out var vis)) return;
+
+        // Remove all existing indicator children tagged "StatusOrb"
+        var toRemove = new System.Collections.Generic.List<Node>();
+        foreach (Node child in vis.Root.GetChildren())
+            if (child.HasMeta("StatusOrb")) toRemove.Add(child);
+        foreach (var n in toRemove) { n.QueueFree(); vis.Root.RemoveChild(n); }
+
+        // Re-create one small sphere per active status
+        float offsetX = -0.3f;
+        foreach (var comp in unit.GetComponents<TacticsBattle.Models.Components.IStatusComponent>())
+        {
+            var orb = new MeshInstance3D
+            {
+                Mesh = new SphereMesh { Radius = 0.09f, Height = 0.18f },
+                MaterialOverride = MakeMat(StatusColor(comp)),
+                Position = new Vector3(offsetX, BodyDims(unit.Type).h + 0.10f, 0f),
+            };
+            orb.SetMeta("StatusOrb", true);
+            vis.Root.AddChild(orb);
+            offsetX += 0.22f;
+        }
+    }
+
+    private static Color StatusColor(TacticsBattle.Models.Components.IStatusComponent s) => s switch
+    {
+        TacticsBattle.Models.Components.PoisonedComponent => new Color(0.20f, 0.80f, 0.15f),
+        TacticsBattle.Models.Components.SlowedComponent   => new Color(0.30f, 0.60f, 1.00f),
+        _ => Colors.White,
+    };
 
     private sealed record TileData(StaticBody3D Body, MeshInstance3D Mesh, StandardMaterial3D Mat, Color BaseColor);
     private sealed record UnitVisual(Node3D Root, MeshInstance3D Mesh, MeshInstance3D HpBarFill, Label3D Label, Unit Unit);

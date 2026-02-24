@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using Godot;
 using TacticsBattle.Models;
 using TacticsBattle.Systems;
@@ -6,20 +7,29 @@ using TacticsBattle.Systems;
 namespace TacticsBattle.Services;
 
 /// <summary>
-/// Stateful map service: owns the tile grid and unit placement.
-/// All pathfinding algorithms are delegated to MovementSystem (pure functions).
+/// Stateful map service. Owns the tile grid and unit placement.
+/// Pathfinding is delegated to MovementSystem (pure functions).
+///
+/// Tile rules are resolved via ITileRuleProvider (strategy pattern) —
+/// swap the provider to change terrain traversal costs globally.
+///
+/// BUG FIX: MoveUnit now clears the origin cell before checking
+/// destination validity, so units killed off-map (-1,-1) are properly
+/// removed from their tile.
 /// </summary>
 public class MapService : IMapService
 {
-    private readonly Tile[,] _tiles;
+    private readonly Tile[,]          _tiles;
+    private readonly ITileRuleProvider _rules;
 
     public int MapWidth  { get; }
     public int MapHeight { get; }
 
-    public MapService(int width = 8, int height = 8, MapTheme theme = MapTheme.Forest)
+    public MapService(int width, int height, MapTheme theme, ITileRuleProvider rules)
     {
         MapWidth  = width;
         MapHeight = height;
+        _rules    = rules;
         _tiles    = new Tile[width, height];
         GenerateMap(theme);
     }
@@ -30,7 +40,11 @@ public class MapService : IMapService
     {
         for (int x = 0; x < MapWidth;  x++)
         for (int y = 0; y < MapHeight; y++)
-            _tiles[x, y] = new Tile(new Vector2I(x, y), PickTileType(x, y, theme));
+        {
+            var type = PickTileType(x, y, theme);
+            var rule = _rules.GetRule(type);
+            _tiles[x, y] = new Tile(new Vector2I(x, y), type, rule.Walkable, rule.MovementCost);
+        }
     }
 
     private TileType PickTileType(int x, int y, MapTheme theme) => theme switch
@@ -48,8 +62,7 @@ public class MapService : IMapService
         _                                 => TileType.Grass,
     };
 
-    // Two-tile-wide fords at x=2-3 and x=7-8
-    private TileType RiverTile(int x, int y)
+    private static TileType RiverTile(int x, int y)
     {
         bool isFord = x == 2 || x == 3 || x == 7 || x == 8;
         if ((y == 3 || y == 4) && !isFord) return TileType.Water;
@@ -58,16 +71,16 @@ public class MapService : IMapService
         return TileType.Grass;
     }
 
-    private TileType MountainTile(int x, int y)
+    private static TileType MountainTile(int x, int y)
     {
-        if ((x == 0 || x == 7) && y >= 2 && y <= 9)  return TileType.Mountain;
-        if ((x == 1 || x == 6) && y >= 3 && y <= 8)  return TileType.Mountain;
-        if ((x == 3 || x == 4) && y >= 4 && y <= 6)  return TileType.Forest;
-        if ((x == 2 || x == 5) && y == 8)             return TileType.Water;
+        if ((x == 0 || x == 7) && y >= 2 && y <= 9) return TileType.Mountain;
+        if ((x == 1 || x == 6) && y >= 3 && y <= 8) return TileType.Mountain;
+        if ((x == 3 || x == 4) && y >= 4 && y <= 6) return TileType.Forest;
+        if ((x == 2 || x == 5) && y == 8)            return TileType.Water;
         return TileType.Grass;
     }
 
-    // ── IMapService — direct tile access ─────────────────────────────────────
+    // ── IMapService ───────────────────────────────────────────────────────────
 
     public Tile GetTile(int x, int y)         => _tiles[x, y];
     public Tile GetTile(Vector2I pos)         => _tiles[pos.X, pos.Y];
@@ -84,31 +97,32 @@ public class MapService : IMapService
         unit.Position = pos;
     }
 
+    // BUG FIX: Always clear origin cell first.
+    // Previously checked IsValidPosition(newPos) before clearing origin —
+    // so a (-1,-1) "death move" left the corpse on its original tile, blocking movement.
     public void MoveUnit(Unit unit, Vector2I newPos)
     {
-        if (!IsValidPosition(unit.Position) || !IsValidPosition(newPos)) return;
-        _tiles[unit.Position.X, unit.Position.Y].OccupyingUnit = null;
-        _tiles[newPos.X, newPos.Y].OccupyingUnit = unit;
+        // Clear origin (always, even if destination is off-map)
+        if (IsValidPosition(unit.Position))
+            _tiles[unit.Position.X, unit.Position.Y].OccupyingUnit = null;
+
         unit.Position = newPos;
         unit.HasMoved = true;
+
+        // Place on destination only if in bounds
+        if (IsValidPosition(newPos))
+            _tiles[newPos.X, newPos.Y].OccupyingUnit = unit;
     }
 
-    public List<Unit> GetAttackableTargets(Unit attacker)
-    {
-        var targets = new List<Unit>();
-        for (int x = 0; x < MapWidth;  x++)
-        for (int y = 0; y < MapHeight; y++)
-        {
-            var u = _tiles[x, y].OccupyingUnit;
-            if (u == null || u.Team == attacker.Team || !u.IsAlive) continue;
-            if (MovementSystem.ManhattanDistance(attacker.Position, u.Position) <= attacker.AttackRange)
-                targets.Add(u);
-        }
-        return targets;
-    }
+    public List<Unit> GetAttackableTargets(Unit attacker) =>
+        (from x in Enumerable.Range(0, MapWidth)
+         from y in Enumerable.Range(0, MapHeight)
+         let u = _tiles[x, y].OccupyingUnit
+         where u != null && u.Team != attacker.Team && u.IsAlive
+            && MovementSystem.ManhattanDistance(attacker.Position, u.Position) <= attacker.AttackRange
+         select u).ToList();
 
-    // ── Delegate pathfinding to MovementSystem (pure functions) ──────────────
-
+    // Delegate pathfinding to pure-function Systems
     public List<Vector2I> GetReachableTiles(Unit unit) =>
         MovementSystem.GetReachableTiles(_tiles, MapWidth, MapHeight, unit);
 

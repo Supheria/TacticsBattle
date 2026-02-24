@@ -1,42 +1,27 @@
-[gd_scene load_steps=11 format=3 uid="uid://btlscene001"]
+[gd_scene load_steps=13 format=3 uid="uid://btlscene001"]
 
-[ext_resource type="Script" uid="uid://btlscope001"  path="res://Scripts/Scope/BattleScope.cs"          id="1_scope"]
-[ext_resource type="Script" uid="uid://lvregh0002"   path="res://Scripts/Hosts/LevelRegistryHost.cs"    id="2_reg"]
-[ext_resource type="Script" uid="uid://scnrouth0002" path="res://Scripts/Hosts/SceneRouterHost.cs"      id="3_rtr"]
-[ext_resource type="Script" uid="uid://gshost0001"   path="res://Scripts/Hosts/GameStateHost.cs"        id="4_gs"]
-[ext_resource type="Script" uid="uid://maphost001"   path="res://Scripts/Hosts/MapHost.cs"              id="5_map"]
-[ext_resource type="Script" uid="uid://btlhost001"   path="res://Scripts/Hosts/BattleHost.cs"           id="6_btl"]
-[ext_resource type="Script" uid="uid://unitmgr001"   path="res://Scripts/Users/UnitManager.cs"          id="7_um"]
-[ext_resource type="Script" uid="uid://btlui0001"    path="res://Scripts/Users/BattleUI.cs"             id="8_ui"]
-[ext_resource type="Script" uid="uid://aictl0001"    path="res://Scripts/Users/AIController.cs"         id="9_ai"]
-[ext_resource type="Script" uid="uid://renderer01"   path="res://Scripts/Users/BattleRenderer3D.cs"     id="10_r"]
+[ext_resource type="Script" path="res://Scripts/Scope/BattleScope.cs"          id="1_scope"]
+[ext_resource type="Script" path="res://Scripts/Hosts/StrategyHost.cs"          id="2_str"]
+[ext_resource type="Script" path="res://Scripts/Hosts/LevelRegistryHost.cs"     id="3_reg"]
+[ext_resource type="Script" path="res://Scripts/Hosts/SceneRouterHost.cs"       id="4_rtr"]
+[ext_resource type="Script" path="res://Scripts/Hosts/GameStateHost.cs"         id="5_gs"]
+[ext_resource type="Script" path="res://Scripts/Hosts/MapHost.cs"               id="6_map"]
+[ext_resource type="Script" path="res://Scripts/Hosts/BattleHost.cs"            id="7_btl"]
+[ext_resource type="Script" path="res://Scripts/Hosts/AudioHost.cs"             id="8_aud"]
+[ext_resource type="Script" path="res://Scripts/Users/UnitManager.cs"           id="9_um"]
+[ext_resource type="Script" path="res://Scripts/Users/BattleUI.cs"              id="10_ui"]
+[ext_resource type="Script" path="res://Scripts/Users/AIController.cs"          id="11_ai"]
+[ext_resource type="Script" path="res://Scripts/Users/BattleRenderer3D.cs"      id="12_r"]
 
-[node name="BattleScene" type="Node"]
-script = ExtResource("1_scope")
-
-[node name="LevelRegistryHost" type="Node" parent="."]
-script = ExtResource("2_reg")
-
-[node name="SceneRouterHost" type="Node" parent="."]
-script = ExtResource("3_rtr")
-
-[node name="GameStateHost" type="Node" parent="."]
-script = ExtResource("4_gs")
-
-[node name="MapHost" type="Node" parent="."]
-script = ExtResource("5_map")
-
-[node name="BattleHost" type="Node" parent="."]
-script = ExtResource("6_btl")
-
-[node name="UnitManager" type="Node" parent="."]
-script = ExtResource("7_um")
-
-[node name="BattleUI" type="CanvasLayer" parent="."]
-script = ExtResource("8_ui")
-
-[node name="AIController" type="Node" parent="."]
-script = ExtResource("9_ai")
-
-[node name="BattleRenderer3D" type="Node3D" parent="."]
-script = ExtResource("10_r")
+[node name="BattleScene"      type="Node"]        script = ExtResource("1_scope")
+[node name="StrategyHost"     type="Node" parent="."] script = ExtResource("2_str")
+[node name="LevelRegistryHost" type="Node" parent="."] script = ExtResource("3_reg")
+[node name="SceneRouterHost"  type="Node" parent="."] script = ExtResource("4_rtr")
+[node name="GameStateHost"    type="Node" parent="."] script = ExtResource("5_gs")
+[node name="MapHost"          type="Node" parent="."] script = ExtResource("6_map")
+[node name="BattleHost"       type="Node" parent="."] script = ExtResource("7_btl")
+[node name="AudioHost"        type="Node" parent="."] script = ExtResource("8_aud")
+[node name="UnitManager"      type="Node" parent="."] script = ExtResource("9_um")
+[node name="BattleUI"         type="CanvasLayer" parent="."] script = ExtResource("10_ui")
+[node name="AIController"     type="Node" parent="."] script = ExtResource("11_ai")
+[node name="BattleRenderer3D" type="Node3D" parent="."] script = ExtResource("12_r")

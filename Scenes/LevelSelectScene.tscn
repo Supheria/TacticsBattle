@@ -1,18 +1,14 @@
-[gd_scene load_steps=4 format=3 uid="uid://lvlselscene1"]
+[gd_scene load_steps=5 format=3 uid="uid://lvlselscene1"]
 
-[ext_resource type="Script" uid="uid://lvlselscope1"  path="res://Scripts/Scope/LevelSelectScope.cs"   id="1_scope"]
-[ext_resource type="Script" uid="uid://lvrегhost1"    path="res://Scripts/Hosts/LevelRegistryHost.cs"  id="2_reg"]
-[ext_resource type="Script" uid="uid://scnrouhost1"   path="res://Scripts/Hosts/SceneRouterHost.cs"    id="3_rtr"]
-[ext_resource type="Script" uid="uid://lvlselui001"   path="res://Scripts/Users/LevelSelectUI.cs"      id="4_ui"]
+[ext_resource type="Script" path="res://Scripts/Scope/LevelSelectScope.cs"  id="1_scope"]
+[ext_resource type="Script" path="res://Scripts/Hosts/LevelRegistryHost.cs" id="2_reg"]
+[ext_resource type="Script" path="res://Scripts/Hosts/SceneRouterHost.cs"   id="3_rtr"]
+[ext_resource type="Script" path="res://Scripts/Hosts/AudioHost.cs"         id="4_aud"]
+[ext_resource type="Script" path="res://Scripts/Users/LevelSelectUI.cs"     id="5_ui"]
 
-[node name="LevelSelectScene" type="Node"]
-script = ExtResource("1_scope")
-
-[node name="LevelRegistryHost" type="Node" parent="."]
-script = ExtResource("2_reg")
-
-[node name="SceneRouterHost" type="Node" parent="."]
-script = ExtResource("3_rtr")
-
-[node name="LevelSelectUI" type="CanvasLayer" parent="."]
-script = ExtResource("4_ui")
+[node name="LevelSelectScene"  type="Node"]        script = ExtResource("1_scope")
+[node name="LevelRegistryHost" type="Node" parent="."] script = ExtResource("2_reg")
+[node name="SceneRouterHost"   type="Node" parent="."] script = ExtResource("3_rtr")
+[node name="AudioHost"         type="Node" parent="."] script = ExtResource("4_aud")
+start_track = 0
+[node name="LevelSelectUI"     type="CanvasLayer" parent="."] script = ExtResource("5_ui")

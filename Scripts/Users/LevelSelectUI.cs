@@ -18,6 +18,7 @@ public sealed partial class LevelSelectUI : CanvasLayer, IDependenciesResolved
 {
     [Inject] private ILevelRegistryService? _registry;
     [Inject] private ISceneRouterService?   _router;
+    [Inject] private TacticsBattle.Audio.IAudioService? _audio;
 
     public override partial void _Notification(int what);
     public override void _Ready() { /* built after DI */ }
@@ -133,7 +134,7 @@ public sealed partial class LevelSelectUI : CanvasLayer, IDependenciesResolved
         var idx = lvl.Index;
         var btn = new Button { Text = "▶  Play" };
         btn.AddThemeFontSizeOverride("font_size", 18);
-        btn.Pressed += () => _router!.GoToBattle(idx);
+        btn.Pressed += () => { _audio?.PlaySfx(TacticsBattle.Audio.SfxEvent.UiClick); _router!.GoToBattle(idx); };
         vb.AddChild(btn);
 
         return card;

@@ -4,31 +4,30 @@ using TacticsBattle.Services;
 
 namespace TacticsBattle.Hosts;
 
-/// <summary>
-/// [Host] that provides IMapService.
-/// Waits for ILevelRegistryService so it can read the active level's
-/// map dimensions and theme (WaitFor demonstrates DI ordering).
-/// </summary>
 [Host]
 public sealed partial class MapHost : Node, IDependenciesResolved
 {
     [Inject] private ILevelRegistryService? _registry;
+    [Inject] private ITileRuleProvider?     _tileRules;
 
     [Provide(
         ExposedTypes = [typeof(IMapService)],
-        WaitFor      = [nameof(_registry)]
+        WaitFor      = [nameof(_registry), nameof(_tileRules)]
     )]
-    public MapService MapSvc => new MapService(
+    public MapService MapSvc => _mapSvc ??= new MapService(
         _registry!.ActiveLevel.MapWidth,
         _registry.ActiveLevel.MapHeight,
-        _registry.ActiveLevel.Theme);
+        _registry.ActiveLevel.Theme,
+        _tileRules!);
+
+    private MapService? _mapSvc;
 
     public override partial void _Notification(int what);
 
     void IDependenciesResolved.OnDependenciesResolved(bool ok)
     {
-        if (!ok) { GD.PrintErr("[MapHost] ILevelRegistryService missing!"); return; }
+        if (!ok) { GD.PrintErr("[MapHost] DI FAILED."); return; }
         var lvl = _registry!.ActiveLevel;
-        GD.Print($"[MapHost] {lvl.MapWidth}×{lvl.MapHeight} map, theme={lvl.Theme}");
+        GD.Print($"[MapHost] {lvl.MapWidth}×{lvl.MapHeight} {lvl.Theme} map ready.");
     }
 }

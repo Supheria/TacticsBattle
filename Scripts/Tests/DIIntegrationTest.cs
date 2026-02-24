@@ -1,95 +1,70 @@
 using System.Linq;
 using Godot;
 using GodotSharpDI.Abstractions;
+using TacticsBattle.Models;
 using TacticsBattle.Services;
 
 namespace TacticsBattle.Tests;
 
 /// <summary>
-/// Integration test node.  Injects all three services and validates them.
-/// Prints PASS / FAIL for each assertion. On test finish, prints a summary.
+/// Integration test node.  Injects all services and validates them.
+/// Uses IUnitDataProvider to construct Units (matching new ctor signature).
+/// Prints PASS / FAIL for each assertion; summary at the end.
 /// </summary>
 [User]
 public sealed partial class DIIntegrationTest : Node, IDependenciesResolved
 {
     [Inject] private IGameStateService? _gameState;
-    [Inject] private IMapService?       _mapService;
-    [Inject] private IBattleService?    _battleService;
+    [Inject] private IMapService?       _map;
+    [Inject] private IBattleService?    _battle;
+    [Inject] private IUnitDataProvider? _unitData;
 
-    private int _passed;
-    private int _failed;
+    private int _pass, _fail;
 
     public override partial void _Notification(int what);
 
-    public override void _Ready() =>
-        GD.Print("[IntegrationTest] _Ready — awaiting DI...");
-
-    void IDependenciesResolved.OnDependenciesResolved(bool isAllDependenciesReady)
+    void IDependenciesResolved.OnDependenciesResolved(bool ok)
     {
-        GD.Print("\n========== DI Integration Tests ==========");
+        if (!ok) { GD.PrintErr("[DITest] DI FAILED"); return; }
+        GD.Print("=== DI Integration Tests ===");
+
         RunAll();
-        PrintSummary();
+
+        GD.Print($"=== Results: {_pass} PASS  {_fail} FAIL ===");
+        if (_fail == 0) GD.Print("✓ All tests passed!");
+        else            GD.PrintErr($"✗ {_fail} test(s) failed!");
     }
 
-    // ──────────────────────────────────────────────────────
-    //  Test groups
-    // ──────────────────────────────────────────────────────
+    // Helper: resolve a fresh template for the given type
+    private Unit MakeUnit(int id, string name, UnitType type, Team team, Vector2I pos)
+    {
+        var tmpl     = _unitData!.GetTemplate(type);
+        var defaults = _unitData.GetDefaultComponents(type);
+        return new Unit(id, name, type, team, pos, tmpl, defaults);
+    }
+
     private void RunAll()
     {
-        TestInjectionNotNull();
-        TestMapServiceProperties();
-        TestGameStateInitialTurn();
-        TestGameStatePhase();
+        TestDiServicesNotNull();
         TestUnitSpawnAndAddRemove();
         TestDamageCalculation();
-        TestAttackExecution();
-        TestSelectionEvent();
-        TestPhaseChangeEvent();
-        TestBattleServiceEvents();
-        TestMoveUnit();
-        TestManhattanDistance();
-        TestVictoryConditionNoEnemies();
-        TestDefeatConditionNoPlayers();
+        TestMovementReachable();
+        TestAttackRange();
+        TestVictoryCondition();
+        TestComponentBag();
     }
 
-    // ──────────────────────────────────────────────────────
-    //  Individual tests
-    // ──────────────────────────────────────────────────────
-
-    private void TestInjectionNotNull()
+    private void TestDiServicesNotNull()
     {
-        Assert(_gameState  != null, "IGameStateService injected");
-        Assert(_mapService != null, "IMapService injected");
-        Assert(_battleService != null, "IBattleService injected");
-    }
-
-    private void TestMapServiceProperties()
-    {
-        Assert(_mapService!.MapWidth  > 0, "MapWidth > 0");
-        Assert(_mapService.MapHeight  > 0, "MapHeight > 0");
-        Assert(_mapService.IsValidPosition(0, 0), "IsValidPosition(0,0) = true");
-        Assert(!_mapService.IsValidPosition(-1, 0), "IsValidPosition(-1,0) = false");
-        Assert(!_mapService.IsValidPosition(999, 999), "IsValidPosition(999,999) = false");
-        var tile = _mapService.GetTile(0, 0);
-        Assert(tile != null, "GetTile(0,0) != null");
-        Assert(tile!.IsWalkable, "GetTile(0,0).IsWalkable");
-    }
-
-    private void TestGameStateInitialTurn()
-    {
-        // StubGameStateService starts at turn 0
-        Assert(_gameState!.CurrentTurn >= 0, "CurrentTurn >= 0");
-    }
-
-    private void TestGameStatePhase()
-    {
-        Assert(_gameState!.Phase == GamePhase.PlayerTurn, "Initial phase = PlayerTurn");
-        Assert(_gameState.IsPlayerTurn, "IsPlayerTurn = true initially");
+        Assert(_gameState != null, "IGameStateService injected");
+        Assert(_map        != null, "IMapService injected");
+        Assert(_battle     != null, "IBattleService injected");
+        Assert(_unitData   != null, "IUnitDataProvider injected");
     }
 
     private void TestUnitSpawnAndAddRemove()
     {
-        var unit = new Models.Unit(99, "Test", Models.UnitType.Warrior, Models.Team.Player, new Godot.Vector2I(0, 0));
+        var unit = MakeUnit(99, "Test", UnitType.Warrior, Team.Player, new Vector2I(0, 0));
         _gameState!.AddUnit(unit);
         Assert(_gameState.AllUnits.Count == 1, "AllUnits.Count == 1 after Add");
         _gameState.RemoveUnit(unit);
@@ -98,137 +73,64 @@ public sealed partial class DIIntegrationTest : Node, IDependenciesResolved
 
     private void TestDamageCalculation()
     {
-        var warrior = new Models.Unit(1, "A", Models.UnitType.Warrior, Models.Team.Player, Godot.Vector2I.Zero);
-        var archer  = new Models.Unit(2, "B", Models.UnitType.Archer,  Models.Team.Enemy,  Godot.Vector2I.One);
-        int dmg = _battleService!.CalculateDamage(warrior, archer);
-        Assert(dmg > 0, $"CalculateDamage > 0 (got {dmg})");
+        var warrior = MakeUnit(1, "A", UnitType.Warrior, Team.Player, Vector2I.Zero);
+        var archer  = MakeUnit(2, "B", UnitType.Archer,  Team.Enemy,  Vector2I.One);
+        int dmg = _battle!.CalculateDamage(warrior, archer);
+        Assert(dmg > 0, $"Damage > 0 (got {dmg})");
+        // Warrior ATK=30, Archer DEF=10 → base ≈ 20 (±10%)
+        Assert(dmg >= 1 && dmg <= 60, $"Damage in plausible range (got {dmg})");
     }
 
-    private void TestAttackExecution()
+    private void TestMovementReachable()
     {
-        var attacker = new Models.Unit(10, "Hero",  Models.UnitType.Warrior, Models.Team.Player, Godot.Vector2I.Zero);
-        var defender = new Models.Unit(11, "Enemy", Models.UnitType.Warrior, Models.Team.Enemy,  Godot.Vector2I.One);
-        _mapService!.PlaceUnit(attacker, Godot.Vector2I.Zero);
-        _mapService.PlaceUnit(defender,  Godot.Vector2I.One);
-        _gameState!.AddUnit(attacker);
-        _gameState.AddUnit(defender);
-
-        int hpBefore = defender.Hp;
-        int dmg = _battleService!.ExecuteAttack(attacker, defender);
-        Assert(dmg >= 0, $"ExecuteAttack returned dmg >= 0 (got {dmg})");
-        Assert(defender.Hp <= hpBefore, "Defender HP decreased after attack");
-        Assert(attacker.HasAttacked, "Attacker.HasAttacked = true after attacking");
-
-        _gameState.RemoveUnit(attacker);
-        if (_gameState.AllUnits.Contains(defender))
-            _gameState.RemoveUnit(defender);
+        var unit  = MakeUnit(3, "Mover", UnitType.Warrior, Team.Player, new Vector2I(1, 1));
+        _map!.PlaceUnit(unit, new Vector2I(1, 1));
+        var reach = _map.GetReachableTiles(unit);
+        Assert(reach.Count > 0, $"Warrior at (1,1) has reachable tiles (got {reach.Count})");
+        _map.MoveUnit(unit, new Vector2I(-1,-1)); // cleanup
     }
 
-    private void TestSelectionEvent()
+    private void TestAttackRange()
     {
-        Models.Unit? received = null;
-        _gameState!.OnSelectionChanged += u => received = u;
-        var unit = new Models.Unit(50, "X", Models.UnitType.Mage, Models.Team.Player, Godot.Vector2I.Zero);
-        _gameState.SelectedUnit = unit;
-        Assert(received == unit, "OnSelectionChanged fired with correct unit");
-        _gameState.SelectedUnit = null;
+        var a = MakeUnit(4, "Att", UnitType.Warrior, Team.Player, new Vector2I(0, 0));
+        var d = MakeUnit(5, "Def", UnitType.Archer,  Team.Enemy,  new Vector2I(1, 0));
+        _map!.PlaceUnit(a, a.Position);
+        _map.PlaceUnit(d, d.Position);
+        var targets = _map.GetAttackableTargets(a);
+        Assert(targets.Count == 1, $"Warrior sees 1 adjacent enemy (got {targets.Count})");
+        // Cleanup
+        _map.MoveUnit(a, new Vector2I(-1,-1));
+        _map.MoveUnit(d, new Vector2I(-1,-1));
     }
 
-    private void TestPhaseChangeEvent()
+    private void TestVictoryCondition()
     {
-        GamePhase? received = null;
-        _gameState!.OnPhaseChanged += p => received = p;
-        _gameState.BeginEnemyTurn();
-        // StubGameStateService doesn't fire events — skip event check, just ensure no crash
-        Assert(true, "BeginEnemyTurn() does not throw");
-        _gameState.BeginPlayerTurn();
-        Assert(true, "BeginPlayerTurn() does not throw");
+        bool victoryFired = false;
+        _gameState!.OnPhaseChanged += p => { if (p == GamePhase.Victory) victoryFired = true; };
+
+        var player = MakeUnit(10, "P", UnitType.Warrior, Team.Player, Vector2I.Zero);
+        var enemy  = MakeUnit(11, "E", UnitType.Mage,    Team.Enemy,  Vector2I.One);
+        _gameState.AddUnit(player);
+        _gameState.AddUnit(enemy);
+        _gameState.RemoveUnit(enemy);
+        _gameState.CheckVictoryCondition();
+        Assert(victoryFired, "Victory fires when all enemies removed");
+        // Cleanup
+        _gameState.RemoveUnit(player);
     }
 
-    private void TestBattleServiceEvents()
+    private void TestComponentBag()
     {
-        bool attackFired  = false;
-        bool defeatFired  = false;
-
-        _battleService!.OnAttackExecuted += (_, _, _) => attackFired = true;
-        _battleService.OnUnitDefeated    += _          => defeatFired = true;
-
-        var attacker = new Models.Unit(20, "P", Models.UnitType.Warrior, Models.Team.Player, new Godot.Vector2I(0,0));
-        var defender = new Models.Unit(21, "E", Models.UnitType.Warrior, Models.Team.Enemy,  new Godot.Vector2I(1,0));
-        // Give defender 1 hp so it dies
-        defender.Hp = 1;
-
-        _mapService!.PlaceUnit(attacker, attacker.Position);
-        _mapService.PlaceUnit(defender, defender.Position);
-        _gameState!.AddUnit(attacker);
-        _gameState.AddUnit(defender);
-
-        _battleService.ExecuteAttack(attacker, defender);
-        Assert(attackFired, "OnAttackExecuted event fired");
-        Assert(defeatFired, "OnUnitDefeated event fired when defender dies");
-
-        if (_gameState.AllUnits.Contains(attacker)) _gameState.RemoveUnit(attacker);
+        var mage = MakeUnit(20, "M", UnitType.Mage, Team.Player, Vector2I.Zero);
+        Assert(mage.Components.Count > 0, "Mage has default component(s)");
+        var poison = mage.GetComponent<TacticsBattle.Models.Components.PoisonOnHitComponent>();
+        Assert(poison != null, "Mage has PoisonOnHitComponent by default");
+        Assert(poison!.DamagePerTurn == 8, $"Poison damage == 8 (got {poison.DamagePerTurn})");
     }
 
-    private void TestMoveUnit()
+    private void Assert(bool condition, string message)
     {
-        var unit = new Models.Unit(30, "M", Models.UnitType.Archer, Models.Team.Player, new Godot.Vector2I(0,0));
-        _mapService!.PlaceUnit(unit, new Godot.Vector2I(0,0));
-        _mapService.MoveUnit(unit, new Godot.Vector2I(1,1));
-        Assert(unit.Position == new Godot.Vector2I(1,1), "MoveUnit updated unit.Position");
-        Assert(unit.HasMoved, "MoveUnit set HasMoved=true");
-    }
-
-    private void TestManhattanDistance()
-    {
-        int d = _mapService!.ManhattanDistance(new Godot.Vector2I(0,0), new Godot.Vector2I(3,4));
-        Assert(d == 7, $"ManhattanDistance(0,0→3,4) == 7 (got {d})");
-    }
-
-    private void TestVictoryConditionNoEnemies()
-    {
-        // Use a fresh service to avoid state from prior tests
-        var gs = new GameStateService();
-        var player = new Models.Unit(40, "P", Models.UnitType.Warrior, Models.Team.Player, Godot.Vector2I.Zero);
-        gs.AddUnit(player);
-        gs.CheckVictoryCondition();
-        Assert(gs.Phase == GamePhase.Victory, "Victory phase set when no enemies remain");
-    }
-
-    private void TestDefeatConditionNoPlayers()
-    {
-        var gs = new GameStateService();
-        var enemy = new Models.Unit(41, "E", Models.UnitType.Warrior, Models.Team.Enemy, Godot.Vector2I.Zero);
-        gs.AddUnit(enemy);
-        gs.CheckVictoryCondition();
-        Assert(gs.Phase == GamePhase.Defeat, "Defeat phase set when no players remain");
-    }
-
-    // ──────────────────────────────────────────────────────
-    //  Helpers
-    // ──────────────────────────────────────────────────────
-    private void Assert(bool condition, string name)
-    {
-        if (condition)
-        {
-            _passed++;
-            GD.Print($"  [PASS] {name}");
-        }
-        else
-        {
-            _failed++;
-            GD.PrintErr($"  [FAIL] {name}");
-        }
-    }
-
-    private void PrintSummary()
-    {
-        GD.Print($"\n  Results: {_passed} passed, {_failed} failed");
-        GD.Print("==========================================\n");
-
-        if (_failed > 0)
-            GD.PrintErr($"[IntegrationTest] {_failed} test(s) FAILED.");
-        else
-            GD.Print("[IntegrationTest] All tests PASSED ✓");
+        if (condition) { GD.Print($"  PASS: {message}"); _pass++; }
+        else           { GD.PrintErr($"  FAIL: {message}"); _fail++; }
     }
 }

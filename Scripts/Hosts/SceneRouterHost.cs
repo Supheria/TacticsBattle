@@ -5,15 +5,9 @@ using TacticsBattle.Services;
 
 namespace TacticsBattle.Hosts;
 
-/// <summary>
-/// [Host] that provides ISceneRouterService.
-/// This is the ONLY place in the codebase that references scene file paths.
-/// Every other node (UI, menus, overlays) calls the service methods.
-/// </summary>
 [Host]
 public sealed partial class SceneRouterHost : Node, ISceneRouterService
 {
-    // ── Scene file paths — single source of truth ─────────────────────────
     private const string BattleScenePath      = "res://Scenes/BattleScene.tscn";
     private const string LevelSelectScenePath = "res://Scenes/LevelSelectScene.tscn";
 
@@ -22,25 +16,25 @@ public sealed partial class SceneRouterHost : Node, ISceneRouterService
 
     public override partial void _Notification(int what);
 
-    // ── ISceneRouterService ───────────────────────────────────────────────
-
     public void GoToBattle(int levelIndex)
     {
+        GetTree().Paused = false;   // always unpause — caller may be inside pause menu
         SelectedLevel.Index = levelIndex;
-        GD.Print($"[SceneRouter] → Battle, level {levelIndex} ({LevelRegistry.Get(levelIndex)?.Name})");
+        GD.Print($"[SceneRouter] → Battle level {levelIndex}");
         GetTree().ChangeSceneToFile(BattleScenePath);
     }
 
     public void GoToMenu()
     {
+        GetTree().Paused = false;   // BUG FIX: new scene inherits pause state if not cleared
         GD.Print("[SceneRouter] → Level Select");
         GetTree().ChangeSceneToFile(LevelSelectScenePath);
     }
 
     public void RestartBattle()
     {
-        GD.Print("[SceneRouter] → Restart");
         GetTree().Paused = false;
+        GD.Print("[SceneRouter] → Restart");
         GetTree().ReloadCurrentScene();
     }
 }
