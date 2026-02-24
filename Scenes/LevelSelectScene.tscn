@@ -1,0 +1,14 @@
+[gd_scene load_steps=3 format=3 uid="uid://lvlselscene1"]
+
+[ext_resource type="Script" uid="uid://lvlselscope1" path="res://Scripts/Scope/LevelSelectScope.cs" id="1_scope"]
+[ext_resource type="Script" uid="uid://lvlmenhost1" path="res://Scripts/Hosts/LevelMenuHost.cs" id="2_host"]
+[ext_resource type="Script" uid="uid://lvlselui001" path="res://Scripts/Users/LevelSelectUI.cs" id="3_ui"]
+
+[node name="LevelSelectScene" type="Node"]
+script = ExtResource("1_scope")
+
+[node name="LevelMenuHost" type="Node" parent="."]
+script = ExtResource("2_host")
+
+[node name="LevelSelectUI" type="CanvasLayer" parent="."]
+script = ExtResource("3_ui")

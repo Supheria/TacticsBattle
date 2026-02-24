@@ -6,73 +6,69 @@ using TacticsBattle.Services;
 
 namespace TacticsBattle.Users;
 
+/// <summary>
+/// DI User: reads ILevelConfigService to spawn units, then manages move/attack helpers.
+/// Injecting ILevelConfigService (alongside the three core services) is all that is
+/// needed to switch levels — no code changes beyond swapping the [Host] in the scope.
+/// </summary>
 [User]
 public sealed partial class UnitManager : Node, IDependenciesResolved
 {
-    [Inject] private IGameStateService? _gameState;
-    [Inject] private IMapService?       _mapService;
-    [Inject] private IBattleService?    _battleService;
+    [Inject] private IGameStateService?   _gameState;
+    [Inject] private IMapService?         _mapService;
+    [Inject] private IBattleService?      _battleService;
+    [Inject] private ILevelConfigService? _levelConfig;
 
-    private readonly List<Unit> _spawnedUnits = new();
     private int _nextId = 1;
 
     public override partial void _Notification(int what);
 
-    public override void _Ready() => GD.Print("[UnitManager] _Ready — waiting for DI...");
+    public override void _Ready() => GD.Print("[UnitManager] Waiting for DI...");
 
     void IDependenciesResolved.OnDependenciesResolved(bool ok)
     {
         if (!ok) { GD.PrintErr("[UnitManager] DI FAILED."); return; }
-        GD.Print("[UnitManager] DI ready — spawning units.");
         SpawnInitialUnits();
         SubscribeEvents();
+        _gameState!.BeginPlayerTurn();
     }
 
     private void SpawnInitialUnits()
     {
-        SpawnUnit("Arthur", UnitType.Warrior, Team.Player, new Vector2I(1, 6));
-        SpawnUnit("Lyra",   UnitType.Archer,  Team.Player, new Vector2I(3, 7));
-        SpawnUnit("Merlin", UnitType.Mage,    Team.Player, new Vector2I(5, 6));
-        SpawnUnit("Orc A",  UnitType.Warrior, Team.Enemy,  new Vector2I(2, 1));
-        SpawnUnit("Orc B",  UnitType.Warrior, Team.Enemy,  new Vector2I(5, 0));
-        SpawnUnit("Goblin", UnitType.Archer,  Team.Enemy,  new Vector2I(4, 2));
-        _gameState!.BeginPlayerTurn();
+        foreach (var s in _levelConfig!.Config.Units)
+            Spawn(s.Name, s.Type, s.Team, s.Position);
     }
 
-    private Unit SpawnUnit(string name, UnitType type, Team team, Vector2I pos)
+    private void Spawn(string name, UnitType type, Team team, Vector2I pos)
     {
         var unit = new Unit(_nextId++, name, type, team, pos);
         _gameState!.AddUnit(unit);
         _mapService!.PlaceUnit(unit, pos);
-        _spawnedUnits.Add(unit);
         GD.Print($"  Spawned: {unit}");
-        return unit;
     }
 
     private void SubscribeEvents()
     {
-        _battleService!.OnUnitDefeated     += u  => GD.Print($"[UnitManager] Defeated: {u.Name}");
+        _battleService!.OnUnitDefeated     += u => GD.Print($"[UnitManager] ☠ {u.Name}");
         _battleService.OnEnemyTurnFinished += ()  => GD.Print("[UnitManager] Enemy done.");
     }
 
-    // ── Public helpers called by BattleRenderer3D ──────────────────────────
+    // ── Public helpers for BattleRenderer3D ──────────────────────────────────
 
     public bool TryMoveSelected(Vector2I target)
     {
-        if (_gameState?.SelectedUnit is not { } unit) return false;
-        if (unit.Team != Team.Player || unit.HasMoved) return false;
+        if (_gameState?.SelectedUnit is not { Team: Team.Player, HasMoved: false } unit) return false;
         if (!_mapService!.GetReachableTiles(unit).Contains(target)) return false;
-
+        // FIX: also guard that destination is empty (no overlap)
+        if (_mapService.GetUnitAt(target) != null) return false;
         _mapService.MoveUnit(unit, target);
-        _gameState.NotifyUnitMoved(unit);   // fires OnUnitMoved → renderer syncs 3D position
-        GD.Print($"[UnitManager] Moved {unit.Name} to {target}");
+        _gameState.NotifyUnitMoved(unit);
         return true;
     }
 
     public bool TryAttackTarget(Unit target)
     {
-        if (_gameState?.SelectedUnit is not { } attacker) return false;
-        if (attacker.Team != Team.Player || attacker.HasAttacked) return false;
+        if (_gameState?.SelectedUnit is not { Team: Team.Player, HasAttacked: false } attacker) return false;
         _battleService!.ExecuteAttack(attacker, target);
         return true;
     }

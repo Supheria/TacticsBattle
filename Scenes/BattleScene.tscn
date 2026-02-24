@@ -1,4 +1,4 @@
-[gd_scene load_steps=9 format=3 uid="uid://b3at1l3sc3n3"]
+[gd_scene load_steps=8 format=3 uid="uid://b3at1l3sc3n3"]
 
 [ext_resource type="Script" uid="uid://dk57hqg8wpc3s" path="res://Scripts/Scope/BattleScope.cs" id="1_scope"]
 [ext_resource type="Script" uid="uid://cc2wan4ik7lj7" path="res://Scripts/Hosts/GameStateHost.cs" id="2_gshost"]
@@ -7,7 +7,6 @@
 [ext_resource type="Script" uid="uid://8vmrx7xbymel" path="res://Scripts/Users/UnitManager.cs" id="5_unitmgr"]
 [ext_resource type="Script" uid="uid://dxhdfk0aip8mu" path="res://Scripts/Users/BattleUI.cs" id="6_battleui"]
 [ext_resource type="Script" uid="uid://23hdujajrpc3" path="res://Scripts/Users/AIController.cs" id="7_ai"]
-[ext_resource type="Script" uid="uid://r3nd3r3r3d1" path="res://Scripts/Users/BattleRenderer3D.cs" id="8_renderer"]
 
 [node name="BattleScene" type="Node"]
 script = ExtResource("1_scope")
@@ -17,8 +16,6 @@ script = ExtResource("2_gshost")
 
 [node name="MapHost" type="Node" parent="."]
 script = ExtResource("3_maphost")
-MapWidth = 8
-MapHeight = 8
 
 [node name="BattleHost" type="Node" parent="."]
 script = ExtResource("4_battlehost")
@@ -31,6 +28,3 @@ script = ExtResource("6_battleui")
 
 [node name="AIController" type="Node" parent="."]
 script = ExtResource("7_ai")
-
-[node name="BattleRenderer3D" type="Node3D" parent="."]
-script = ExtResource("8_renderer")

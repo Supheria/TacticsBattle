@@ -1,0 +1,38 @@
+[gd_scene load_steps=10 format=3 uid="uid://lvl1scene001"]
+
+[ext_resource type="Script" uid="uid://lvl1scope001" path="res://Scripts/Scope/Level1Scope.cs" id="1_scope"]
+[ext_resource type="Script" uid="uid://lvl1cfg0001" path="res://Scripts/Hosts/Level1ConfigHost.cs" id="2_cfg"]
+[ext_resource type="Script" uid="uid://gshost0001" path="res://Scripts/Hosts/GameStateHost.cs" id="3_gshost"]
+[ext_resource type="Script" uid="uid://maphost001" path="res://Scripts/Hosts/MapHost.cs" id="4_maphost"]
+[ext_resource type="Script" uid="uid://btlhost001" path="res://Scripts/Hosts/BattleHost.cs" id="5_btlhost"]
+[ext_resource type="Script" uid="uid://unitmgr001" path="res://Scripts/Users/UnitManager.cs" id="6_unitmgr"]
+[ext_resource type="Script" uid="uid://btlui0001" path="res://Scripts/Users/BattleUI.cs" id="7_btlui"]
+[ext_resource type="Script" uid="uid://aictl0001" path="res://Scripts/Users/AIController.cs" id="8_ai"]
+[ext_resource type="Script" uid="uid://renderer01" path="res://Scripts/Users/BattleRenderer3D.cs" id="9_rend"]
+
+[node name="Level1Scene" type="Node"]
+script = ExtResource("1_scope")
+
+[node name="Level1ConfigHost" type="Node" parent="."]
+script = ExtResource("2_cfg")
+
+[node name="GameStateHost" type="Node" parent="."]
+script = ExtResource("3_gshost")
+
+[node name="MapHost" type="Node" parent="."]
+script = ExtResource("4_maphost")
+
+[node name="BattleHost" type="Node" parent="."]
+script = ExtResource("5_btlhost")
+
+[node name="UnitManager" type="Node" parent="."]
+script = ExtResource("6_unitmgr")
+
+[node name="BattleUI" type="CanvasLayer" parent="."]
+script = ExtResource("7_btlui")
+
+[node name="AIController" type="Node" parent="."]
+script = ExtResource("8_ai")
+
+[node name="BattleRenderer3D" type="Node3D" parent="."]
+script = ExtResource("9_rend")

@@ -12,9 +12,9 @@ public interface IGameStateService
     GamePhase Phase { get; }
     bool IsPlayerTurn => Phase == GamePhase.PlayerTurn;
 
-    IReadOnlyList<Unit> AllUnits { get; }
+    IReadOnlyList<Unit> AllUnits    { get; }
     IReadOnlyList<Unit> PlayerUnits { get; }
-    IReadOnlyList<Unit> EnemyUnits { get; }
+    IReadOnlyList<Unit> EnemyUnits  { get; }
 
     Unit? SelectedUnit { get; set; }
 
@@ -25,11 +25,11 @@ public interface IGameStateService
     void EndTurn();
     void CheckVictoryCondition();
 
-    /// <summary>Notify 3D renderer that a unit has moved.</summary>
+    /// <summary>Fires OnUnitMoved so the 3D renderer can sync world positions.</summary>
     void NotifyUnitMoved(Unit unit);
 
-    event Action<GamePhase>  OnPhaseChanged;
-    event Action<int>        OnTurnStarted;
-    event Action<Unit?>      OnSelectionChanged;
-    event Action<Unit>       OnUnitMoved;
+    event Action<GamePhase> OnPhaseChanged;
+    event Action<int>       OnTurnStarted;
+    event Action<Unit?>     OnSelectionChanged;
+    event Action<Unit>      OnUnitMoved;
 }

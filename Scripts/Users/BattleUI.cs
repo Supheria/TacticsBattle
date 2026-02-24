@@ -7,11 +7,13 @@ namespace TacticsBattle.Users;
 
 /// <summary>
 /// DI User — 2D HUD overlay (CanvasLayer).
-/// Fixes applied:
-///   • End Turn button enabled immediately on DI resolve when phase is PlayerTurn
-///   • Battle Log uses ScrollContainer with auto-scroll
-///   • Game Over panel has a "Play Again" restart button
-///   • Bottom unit-info panel with readable font sizes
+///
+/// Fixes in this version:
+///   1. End Turn button state synced immediately after DI resolves (no missed first event).
+///   2. Battle Log uses ScrollContainer; auto-scrolls to bottom on each entry.
+///   3. Game-over panel has "Play Again" (reload) and "Menu" (back to level select) buttons.
+///   4. Unit info panel: fixed anchors so it actually appears; shows info for any selected unit
+///      (player OR enemy), with clear team/role label.
 /// </summary>
 [User]
 public sealed partial class BattleUI : CanvasLayer, IDependenciesResolved
@@ -19,21 +21,23 @@ public sealed partial class BattleUI : CanvasLayer, IDependenciesResolved
     [Inject] private IGameStateService? _gameState;
     [Inject] private IBattleService?    _battleService;
 
-    // ── Top-left HUD ──────────────────────────────────────────────────────
+    // ── HUD ───────────────────────────────────────────────────────────────────
     private Label?           _turnLabel;
     private Label?           _phaseLabel;
     private Button?          _endTurnButton;
-    private Label?           _logLabel;
     private ScrollContainer? _logScroll;
+    private Label?           _logLabel;
+    private bool             _needsScroll;
 
-    // ── Bottom unit-info panel ────────────────────────────────────────────
-    private Panel? _unitInfoPanel;
-    private Label? _unitNameLabel;
-    private Label? _unitHpLabel;
-    private Label? _unitStatsLabel;
-    private Label? _unitActionsLabel;
+    // ── Unit info panel ───────────────────────────────────────────────────────
+    private Panel? _unitPanel;
+    private Label? _unitHeader;   // "[YOUR UNIT]" or "[ENEMY INFO]"
+    private Label? _unitName;
+    private Label? _unitHp;
+    private Label? _unitStats;
+    private Label? _unitActions;
 
-    // ── Game-over overlay ─────────────────────────────────────────────────
+    // ── Game-over overlay ─────────────────────────────────────────────────────
     private Panel? _gameOverPanel;
     private Label? _gameOverLabel;
 
@@ -41,16 +45,23 @@ public sealed partial class BattleUI : CanvasLayer, IDependenciesResolved
 
     public override void _Ready()
     {
-        BuildHudPanel();
+        BuildHud();
         BuildUnitInfoPanel();
         BuildGameOverPanel();
+    }
+
+    // ── _Process handles deferred log scroll ──────────────────────────────────
+    public override void _Process(double _)
+    {
+        if (!_needsScroll || _logScroll == null) return;
+        _logScroll.ScrollVertical = (int)(_logScroll.GetVScrollBar()?.MaxValue ?? 999999f);
+        _needsScroll = false;
     }
 
     void IDependenciesResolved.OnDependenciesResolved(bool ok)
     {
         if (!ok) { GD.PrintErr("[BattleUI] DI failed."); return; }
 
-        // ── Subscribe events ──────────────────────────────────────────────
         _gameState!.OnPhaseChanged += phase =>
         {
             _phaseLabel!.Text        = $"Phase: {phase}";
@@ -66,40 +77,38 @@ public sealed partial class BattleUI : CanvasLayer, IDependenciesResolved
             AppendLog($"─── Turn {turn} ───");
         };
 
-        _gameState.OnSelectionChanged += UpdateUnitInfoPanel;
+        // FIX #4: subscribe to selection → show info for ANY unit (player or enemy)
+        _gameState.OnSelectionChanged += ShowUnitInfo;
 
         _battleService!.OnAttackExecuted += (atk, def, dmg) =>
             AppendLog($"{atk.Name} → {def.Name}  -{dmg} HP");
 
-        _battleService.OnUnitDefeated += unit =>
-            AppendLog($"☠ {unit.Name} defeated!");
+        _battleService.OnUnitDefeated += u =>
+            AppendLog($"☠ {u.Name} defeated!");
 
-        // FIX #3: Sync button & labels immediately — don't wait for next event.
-        // BeginPlayerTurn() may have already fired before we subscribed.
+        // FIX #3: sync state immediately — BeginPlayerTurn may have already fired
         _endTurnButton!.Disabled = _gameState.Phase != GamePhase.PlayerTurn;
         _phaseLabel!.Text        = $"Phase: {_gameState.Phase}";
         _turnLabel!.Text         = $"Turn  {_gameState.CurrentTurn}";
     }
 
-    // ─────────────────────────────────────────────────────────────────────
-    //  Keyboard shortcut
-    // ─────────────────────────────────────────────────────────────────────
     public override void _Input(InputEvent ev)
     {
         if (ev is InputEventKey { Pressed: true, Keycode: Key.Enter })
             _gameState?.EndTurn();
     }
 
-    // ─────────────────────────────────────────────────────────────────────
-    //  UI construction helpers
-    // ─────────────────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────────
+    //  UI construction
+    // ─────────────────────────────────────────────────────────────────────────
 
-    private void BuildHudPanel()
+    private void BuildHud()
     {
-        var bg = new Panel();
-        bg.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.TopLeft);
-        bg.CustomMinimumSize = new Vector2(220, 0);
-        bg.Position          = new Vector2(8, 8);
+        var bg = new Panel { CustomMinimumSize = new Vector2(214, 0) };
+        bg.AnchorLeft   = 0; bg.AnchorTop    = 0;
+        bg.AnchorRight  = 0; bg.AnchorBottom = 0;
+        bg.OffsetLeft   = 8; bg.OffsetTop    = 8;
+        bg.OffsetRight  = 222; bg.OffsetBottom = 290;
         AddChild(bg);
 
         var vbox = new VBoxContainer();
@@ -107,119 +116,130 @@ public sealed partial class BattleUI : CanvasLayer, IDependenciesResolved
         vbox.AddThemeConstantOverride("separation", 4);
         bg.AddChild(vbox);
 
-        vbox.AddChild(new Control { CustomMinimumSize = new Vector2(0, 4) }); // top padding
+        vbox.AddChild(new Control { CustomMinimumSize = new Vector2(0, 4) });
 
-        _turnLabel  = MakeLabel("Turn  —",  14, bold: true);
-        _phaseLabel = MakeLabel("Phase: —", 12, bold: false);
+        _turnLabel  = Lbl("Turn  —",  14, true);
+        _phaseLabel = Lbl("Phase: —", 12, false);
         vbox.AddChild(_turnLabel);
         vbox.AddChild(_phaseLabel);
         vbox.AddChild(new HSeparator());
 
-        // FIX #3: Button starts enabled (will be corrected to phase state in OnDependenciesResolved)
+        // FIX #3: starts enabled; corrected in OnDependenciesResolved
         _endTurnButton = new Button { Text = "End Turn  [Enter]", Disabled = false };
         _endTurnButton.Pressed += () => _gameState?.EndTurn();
         vbox.AddChild(_endTurnButton);
         vbox.AddChild(new HSeparator());
-        vbox.AddChild(MakeLabel("Battle Log", 12, bold: true));
+        vbox.AddChild(Lbl("Battle Log", 12, true));
 
-        // FIX #2: wrap log in a ScrollContainer
-        _logScroll = new ScrollContainer();
-        _logScroll.CustomMinimumSize         = new Vector2(0, 160);
-        _logScroll.HorizontalScrollMode      = ScrollContainer.ScrollMode.Disabled;
-        _logScroll.SizeFlagsVertical         = Control.SizeFlags.ExpandFill;
+        // FIX #2: ScrollContainer for log
+        _logScroll = new ScrollContainer { HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled };
+        _logScroll.CustomMinimumSize   = new Vector2(0, 150);
+        _logScroll.SizeFlagsVertical   = Control.SizeFlags.ExpandFill;
         vbox.AddChild(_logScroll);
 
-        _logLabel = new Label
-        {
-            AutowrapMode              = TextServer.AutowrapMode.WordSmart,
-            CustomMinimumSize         = new Vector2(200, 0),
-            SizeFlagsHorizontal       = Control.SizeFlags.ExpandFill,
-        };
+        _logLabel = new Label { AutowrapMode = TextServer.AutowrapMode.WordSmart };
         _logLabel.AddThemeFontSizeOverride("font_size", 11);
+        _logLabel.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        _logLabel.CustomMinimumSize   = new Vector2(198, 0);
         _logScroll.AddChild(_logLabel);
     }
 
     private void BuildUnitInfoPanel()
     {
-        _unitInfoPanel = new Panel { Visible = false };
-        _unitInfoPanel.CustomMinimumSize = new Vector2(300, 88);
-        _unitInfoPanel.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.BottomLeft);
-        _unitInfoPanel.OffsetBottom = -8;
-        _unitInfoPanel.OffsetLeft   = 8;
-        AddChild(_unitInfoPanel);
+        // FIX #4: explicit anchor placement at bottom-left
+        _unitPanel = new Panel { Visible = false };
+        _unitPanel.AnchorLeft   = 0f;  _unitPanel.AnchorTop    = 1f;
+        _unitPanel.AnchorRight  = 0f;  _unitPanel.AnchorBottom = 1f;
+        _unitPanel.OffsetLeft   = 8f;  _unitPanel.OffsetTop    = -112f;
+        _unitPanel.OffsetRight  = 330f; _unitPanel.OffsetBottom = -8f;
+        AddChild(_unitPanel);
 
-        var hbox = new HBoxContainer();
-        hbox.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
-        hbox.AddThemeConstantOverride("separation", 14);
-        _unitInfoPanel.AddChild(hbox);
+        var vb = new VBoxContainer();
+        vb.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+        vb.AddThemeConstantOverride("separation", 3);
+        _unitPanel.AddChild(vb);
 
-        var left  = new VBoxContainer { CustomMinimumSize = new Vector2(140, 0) };
-        _unitNameLabel  = MakeLabel("", 14, bold: true);
-        _unitHpLabel    = MakeLabel("", 12, bold: false);
-        left.AddChild(_unitNameLabel);
-        left.AddChild(_unitHpLabel);
-        hbox.AddChild(left);
-
-        var right = new VBoxContainer();
-        _unitStatsLabel   = MakeLabel("", 11, bold: false);
-        _unitActionsLabel = MakeLabel("", 11, bold: false);
-        right.AddChild(_unitStatsLabel);
-        right.AddChild(_unitActionsLabel);
-        hbox.AddChild(right);
+        vb.AddChild(new Control { CustomMinimumSize = new Vector2(0, 4) });
+        _unitHeader  = Lbl("",  11, false); _unitHeader.AddThemeColorOverride("font_color", new Color(0.6f,0.8f,1f));
+        _unitName    = Lbl("",  15, true);
+        _unitHp      = Lbl("",  12, false);
+        _unitStats   = Lbl("",  11, false);
+        _unitActions = Lbl("",  11, false);
+        vb.AddChild(_unitHeader);
+        vb.AddChild(_unitName);
+        vb.AddChild(_unitHp);
+        vb.AddChild(_unitStats);
+        vb.AddChild(_unitActions);
     }
 
     private void BuildGameOverPanel()
     {
         _gameOverPanel = new Panel { Visible = false };
-        _gameOverPanel.CustomMinimumSize = new Vector2(340, 160);
-        _gameOverPanel.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.Center);
+        _gameOverPanel.AnchorLeft   = 0.5f; _gameOverPanel.AnchorTop    = 0.5f;
+        _gameOverPanel.AnchorRight  = 0.5f; _gameOverPanel.AnchorBottom = 0.5f;
+        _gameOverPanel.OffsetLeft   = -180f; _gameOverPanel.OffsetTop   = -100f;
+        _gameOverPanel.OffsetRight  =  180f; _gameOverPanel.OffsetBottom =  100f;
         AddChild(_gameOverPanel);
 
-        var vbox = new VBoxContainer();
-        vbox.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
-        vbox.AddThemeConstantOverride("separation", 12);
-        _gameOverPanel.AddChild(vbox);
+        var vb = new VBoxContainer();
+        vb.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+        vb.AddThemeConstantOverride("separation", 12);
+        _gameOverPanel.AddChild(vb);
 
-        _gameOverLabel = MakeLabel("", 22, bold: true);
+        vb.AddChild(new Control { CustomMinimumSize = new Vector2(0, 8) });
+
+        _gameOverLabel = Lbl("", 26, true);
         _gameOverLabel.HorizontalAlignment = HorizontalAlignment.Center;
-        _gameOverLabel.SizeFlagsVertical   = Control.SizeFlags.ExpandFill;
-        vbox.AddChild(_gameOverLabel);
+        vb.AddChild(_gameOverLabel);
 
         // FIX #1: Restart button
-        var restartBtn = new Button { Text = "Play Again" };
-        restartBtn.Pressed += () => GetTree().ReloadCurrentScene();
-        vbox.AddChild(restartBtn);
+        var btnRow = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
+        btnRow.AddThemeConstantOverride("separation", 12);
+        vb.AddChild(btnRow);
 
-        var margin = new Control { CustomMinimumSize = new Vector2(0, 8) };
-        vbox.AddChild(margin);
+        var btnAgain = new Button { Text = "Play Again" };
+        btnAgain.AddThemeFontSizeOverride("font_size", 16);
+        btnAgain.Pressed += () => GetTree().ReloadCurrentScene();
+        btnRow.AddChild(btnAgain);
+
+        var btnMenu = new Button { Text = "Level Select" };
+        btnMenu.AddThemeFontSizeOverride("font_size", 16);
+        btnMenu.Pressed += () => GetTree().ChangeSceneToFile("res://Scenes/LevelSelectScene.tscn");
+        btnRow.AddChild(btnMenu);
     }
 
-    // ─────────────────────────────────────────────────────────────────────
-    //  Event handlers
-    // ─────────────────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Helpers
+    // ─────────────────────────────────────────────────────────────────────────
 
-    private void UpdateUnitInfoPanel(Unit? unit)
+    private void ShowUnitInfo(Unit? unit)
     {
-        if (unit == null) { _unitInfoPanel!.Visible = false; return; }
-        _unitInfoPanel!.Visible  = true;
-        _unitNameLabel!.Text     = $"{unit.Name}  [{unit.Team} · {unit.Type}]";
-        _unitHpLabel!.Text       = $"HP  {unit.Hp} / {unit.MaxHp}";
-        _unitStatsLabel!.Text    = $"ATK {unit.Attack}   DEF {unit.Defense}   MOVE {unit.MoveRange}   RNG {unit.AttackRange}";
-        string mv = unit.HasMoved    ? "Move ✓" : "Move ●";
-        string at = unit.HasAttacked ? "  Attack ✓" : "  Attack ●";
-        _unitActionsLabel!.Text  = mv + at;
+        if (unit == null) { _unitPanel!.Visible = false; return; }
+
+        _unitPanel!.Visible = true;
+        bool isPlayer = unit.Team == Team.Player;
+
+        _unitHeader!.Text = isPlayer ? "[ YOUR UNIT ]" : "[ ENEMY INFO ]";
+        _unitHeader.AddThemeColorOverride("font_color",
+            isPlayer ? new Color(0.4f, 0.9f, 1f) : new Color(1f, 0.5f, 0.4f));
+
+        _unitName!.Text    = $"{unit.Name}  ({unit.Type})";
+        _unitHp!.Text      = $"HP  {unit.Hp} / {unit.MaxHp}";
+        _unitStats!.Text   = $"ATK {unit.Attack}   DEF {unit.Defense}   MOVE {unit.MoveRange}   RNG {unit.AttackRange}";
+        _unitActions!.Text = isPlayer
+            ? $"Move {(unit.HasMoved ? "✓" : "●")}    Attack {(unit.HasAttacked ? "✓" : "●")}"
+            : "";
     }
 
     private void ShowGameOver(bool victory)
     {
         _gameOverPanel!.Visible = true;
-        _gameOverLabel!.Text    = victory ? "⚔  VICTORY!\nAll enemies defeated!" : "💀  DEFEAT!\nAll your units were lost.";
+        _gameOverLabel!.Text    = victory
+            ? "⚔  VICTORY!\nAll enemies defeated!"
+            : "💀  DEFEAT!\nAll your units were lost.";
     }
 
-    // ─────────────────────────────────────────────────────────────────────
-    //  FIX #2: auto-scroll log to bottom after every append
-    // ─────────────────────────────────────────────────────────────────────
-    private const int MaxLog = 60;   // keep last 60 lines; scroll shows all
+    private const int MaxLog = 60;
     private readonly System.Collections.Generic.List<string> _logLines = new();
 
     private void AppendLog(string msg)
@@ -227,14 +247,10 @@ public sealed partial class BattleUI : CanvasLayer, IDependenciesResolved
         _logLines.Add(msg);
         if (_logLines.Count > MaxLog) _logLines.RemoveAt(0);
         _logLabel!.Text = string.Join("\n", _logLines);
-        // deferred so layout has recalculated before we scroll
-        _logScroll!.CallDeferred(ScrollContainer.MethodName.EnsureControlVisible, _logLabel);
+        _needsScroll = true;
     }
 
-    // ─────────────────────────────────────────────────────────────────────
-    //  Shared factory
-    // ─────────────────────────────────────────────────────────────────────
-    private static Label MakeLabel(string text, int size, bool bold)
+    private static Label Lbl(string text, int size, bool bold)
     {
         var l = new Label { Text = text };
         l.AddThemeFontSizeOverride("font_size", size);

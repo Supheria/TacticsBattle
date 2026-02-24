@@ -11,23 +11,4 @@
   <ItemGroup>
     <PackageReference Include="GodotSharpDI" Version="1.2.0-rc.1" />
   </ItemGroup>
-
-  <!--
-    References to GodotSharpDI-1.2.0 placed in the SIBLING directory:
-      ../GodotSharpDI-1.2.0/GodotSharpDI.Abstractions/
-      ../GodotSharpDI-1.2.0/GodotSharpDI.SourceGenerator/
-
-    Directory layout expected:
-      <root>/
-        GodotSharpDI-1.2.0/     ← extracted from the zip
-        TacticsBattle/           ← this project
-  -->
-<!--  <ItemGroup>-->
-<!--    <ProjectReference-->
-<!--      Include="..\GodotSharpDI-1.2.0\GodotSharpDI.Abstractions\GodotSharpDI.Abstractions.csproj" />-->
-<!--    <ProjectReference-->
-<!--      Include="..\GodotSharpDI-1.2.0\GodotSharpDI.SourceGenerator\GodotSharpDI.SourceGenerator.csproj"-->
-<!--      OutputItemType="Analyzer"-->
-<!--      ReferenceOutputAssembly="false" />-->
-<!--  </ItemGroup>-->
 </Project>

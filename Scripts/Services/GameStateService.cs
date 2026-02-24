@@ -28,8 +28,8 @@ public class GameStateService : IGameStateService
     public event Action<Unit?>?     OnSelectionChanged;
     public event Action<Unit>?      OnUnitMoved;
 
-    public void AddUnit(Unit unit)    => _allUnits.Add(unit);
-    public void RemoveUnit(Unit unit) => _allUnits.Remove(unit);
+    public void AddUnit(Unit unit)         => _allUnits.Add(unit);
+    public void RemoveUnit(Unit unit)      => _allUnits.Remove(unit);
     public void NotifyUnitMoved(Unit unit) => OnUnitMoved?.Invoke(unit);
 
     public void BeginPlayerTurn()
@@ -60,13 +60,13 @@ public class GameStateService : IGameStateService
         if (EnemyUnits.Count == 0 && Phase != GamePhase.Victory)
         {
             Phase = GamePhase.Victory;
-            GD.Print("*** VICTORY! All enemies defeated! ***");
+            GD.Print("*** VICTORY! ***");
             OnPhaseChanged?.Invoke(Phase);
         }
         else if (PlayerUnits.Count == 0 && Phase != GamePhase.Defeat)
         {
             Phase = GamePhase.Defeat;
-            GD.Print("*** DEFEAT! All player units lost! ***");
+            GD.Print("*** DEFEAT! ***");
             OnPhaseChanged?.Invoke(Phase);
         }
     }
