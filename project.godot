@@ -11,7 +11,7 @@ config_version=5
 [application]
 
 config/name="TacticsBattle - GodotSharpDI Demo"
-run/main_scene="uid://lvlselscene1"
+run/main_scene="uid://t3stsc3n3d1"
 config/features=PackedStringArray("4.5", "C#", "Forward Plus")
 config/icon="res://icon.svg"
 

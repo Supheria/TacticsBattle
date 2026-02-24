@@ -11,6 +11,9 @@ public class MapService : IMapService
     public int MapWidth  { get; }
     public int MapHeight { get; }
 
+    private static readonly Vector2I[] Dirs =
+        { Vector2I.Up, Vector2I.Down, Vector2I.Left, Vector2I.Right };
+
     public MapService(int width = 8, int height = 8, MapTheme theme = MapTheme.Forest)
     {
         MapWidth  = width;
@@ -37,37 +40,49 @@ public class MapService : IMapService
 
     private static TileType ForestTile(int x, int y) => (x, y) switch
     {
-        (3,3) or (3,4) or (4,3) or (4,4)         => TileType.Forest,
-        (0,7) or (7,0) or (1,7) or (7,1)         => TileType.Mountain,
-        (6,6) or (6,7) or (7,6) or (7,7)         => TileType.Water,
-        _                                         => TileType.Grass,
+        (3,3) or (3,4) or (4,3) or (4,4) => TileType.Forest,
+        (0,7) or (7,0) or (1,7) or (7,1) => TileType.Mountain,
+        (6,6) or (6,7) or (7,6) or (7,7) => TileType.Water,
+        _                                 => TileType.Grass,
     };
 
-    // 10x8: horizontal water river at y=3-4; 2 ford crossings at x=2 and x=7
+    // ── Level 2 — River Crossing (10 × 8) ────────────────────────────────────
+    // Water band at y = 3-4.
+    // FIX: TWO-tile-wide fords at x = 2-3 (left) and x = 7-8 (right) instead of
+    //      single tiles — prevents a single enemy from fully blocking a crossing.
     private TileType RiverTile(int x, int y)
     {
-        if ((y == 3 || y == 4) && x != 2 && x != 7) return TileType.Water;
-        if ((x == 0 || x == 1 || x == 8 || x == 9) && y <= 1) return TileType.Forest;
-        if ((x == 0 || x == 9) && y >= 5) return TileType.Mountain;
+        bool isFord = (x == 2 || x == 3 || x == 7 || x == 8);
+        if ((y == 3 || y == 4) && !isFord) return TileType.Water;
+        // Forest fringe at top corners for visual variety
+        if ((x <= 1 || x >= 8) && y <= 1)  return TileType.Forest;
+        // Rough terrain at outer edges south of river
+        if ((x == 0 || x == 9) && y >= 5)  return TileType.Mountain;
         return TileType.Grass;
     }
 
-    // 8x12: mountain walls left/right rows 3-8; forest centre; water pools
+    // ── Level 3 — Mountain Pass (8 × 12) ─────────────────────────────────────
+    // Mountain walls channel units through a 4-tile-wide central corridor
+    // (x = 2-5). Forest and water create tactical cover inside the pass.
     private TileType MountainTile(int x, int y)
     {
-        if ((x == 0 || x == 7) && y >= 3 && y <= 8) return TileType.Mountain;
-        if ((x == 1 || x == 6) && y >= 4 && y <= 7) return TileType.Mountain;
-        if ((x == 3 || x == 4) && (y == 5 || y == 6)) return TileType.Forest;
-        if ((x == 3 || x == 4) && y == 9)             return TileType.Water;
+        // Outer walls throughout mid-section
+        if ((x == 0 || x == 7) && y >= 2 && y <= 9)  return TileType.Mountain;
+        // Inner walls narrow the pass in the middle rows
+        if ((x == 1 || x == 6) && y >= 3 && y <= 8)  return TileType.Mountain;
+        // Forest clusters inside the pass (tactical cover)
+        if ((x == 3 || x == 4) && y >= 4 && y <= 6)  return TileType.Forest;
+        // Water pool near the south end of the pass
+        if ((x == 2 || x == 5) && y == 8)             return TileType.Water;
         return TileType.Grass;
     }
 
     // ── IMapService ───────────────────────────────────────────────────────────
 
-    public Tile GetTile(int x, int y)    => _tiles[x, y];
-    public Tile GetTile(Vector2I pos)    => _tiles[pos.X, pos.Y];
-    public bool IsValidPosition(int x, int y) => x >= 0 && y >= 0 && x < MapWidth && y < MapHeight;
-    public bool IsValidPosition(Vector2I p)   => IsValidPosition(p.X, p.Y);
+    public Tile GetTile(int x, int y)            => _tiles[x, y];
+    public Tile GetTile(Vector2I pos)            => _tiles[pos.X, pos.Y];
+    public bool IsValidPosition(int x, int y)    => x >= 0 && y >= 0 && x < MapWidth && y < MapHeight;
+    public bool IsValidPosition(Vector2I p)      => IsValidPosition(p.X, p.Y);
 
     public Unit? GetUnitAt(Vector2I pos) =>
         IsValidPosition(pos) ? _tiles[pos.X, pos.Y].OccupyingUnit : null;
@@ -89,8 +104,9 @@ public class MapService : IMapService
     }
 
     /// <summary>
-    /// BUG FIX: units can PASS THROUGH friendly tiles but can only STOP on empty tiles.
-    /// No unit may ever occupy the same cell as another (no-overlap rule).
+    /// BFS reachable tiles respecting movement costs and the no-overlap rule.
+    /// Units may pass through allied tiles but can only stop on empty tiles.
+    /// Enemy tiles block passage entirely.
     /// </summary>
     public List<Vector2I> GetReachableTiles(Unit unit)
     {
@@ -105,19 +121,19 @@ public class MapService : IMapService
         {
             var (pos, mp) = queue.Dequeue();
 
-            // Only add as a reachable destination if the cell is empty
+            // Destination must be empty (no-overlap rule)
             if (pos != unit.Position && _tiles[pos.X, pos.Y].OccupyingUnit == null)
                 reachable.Add(pos);
 
             if (mp <= 0) continue;
 
-            foreach (var dir in new[] { Vector2I.Up, Vector2I.Down, Vector2I.Left, Vector2I.Right })
+            foreach (var dir in Dirs)
             {
                 var next = pos + dir;
                 if (!IsValidPosition(next) || visited.Contains(next)) continue;
                 var tile = GetTile(next);
                 if (!tile.IsWalkable) continue;
-                // Cannot pass through enemy units; CAN pass through friendly (just can't stop there)
+                // Cannot pass through enemy units
                 if (tile.OccupyingUnit != null && tile.OccupyingUnit.Team != unit.Team) continue;
                 visited.Add(next);
                 queue.Enqueue((next, mp - tile.MovementCost));
@@ -142,4 +158,38 @@ public class MapService : IMapService
 
     public int ManhattanDistance(Vector2I a, Vector2I b) =>
         System.Math.Abs(a.X - b.X) + System.Math.Abs(a.Y - b.Y);
+
+    /// <summary>
+    /// Dijkstra from <paramref name="start"/> considering only terrain movement costs.
+    /// Unit positions are IGNORED — this gives the true "geographic" distance through
+    /// the terrain so the AI can find the right direction even through narrow corridors
+    /// like river fords or mountain passes.
+    /// </summary>
+    public Dictionary<Vector2I, int> TerrainDistances(Vector2I start)
+    {
+        var dist = new Dictionary<Vector2I, int> { [start] = 0 };
+        var pq   = new PriorityQueue<Vector2I, int>();
+        pq.Enqueue(start, 0);
+
+        while (pq.Count > 0)
+        {
+            pq.TryDequeue(out var pos, out int d);
+            if (d > dist.GetValueOrDefault(pos, int.MaxValue)) continue; // stale entry
+
+            foreach (var dir in Dirs)
+            {
+                var next = pos + dir;
+                if (!IsValidPosition(next)) continue;
+                var tile = GetTile(next);
+                if (!tile.IsWalkable) continue;      // water / impassable
+                int nd = d + tile.MovementCost;
+                if (nd < dist.GetValueOrDefault(next, int.MaxValue))
+                {
+                    dist[next] = nd;
+                    pq.Enqueue(next, nd);
+                }
+            }
+        }
+        return dist;
+    }
 }
