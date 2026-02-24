@@ -1,34 +1,34 @@
 using Godot;
 using GodotSharpDI.Abstractions;
-using TacticsBattle.Models;
 using TacticsBattle.Services;
 
 namespace TacticsBattle.Hosts;
 
 /// <summary>
 /// [Host] that provides IMapService.
-/// Waits for ILevelConfigService so it can read map dimensions and theme.
-/// This WaitFor demonstrates GodotSharpDI's dependency ordering.
+/// Waits for ILevelRegistryService so it can read the active level's
+/// map dimensions and theme (WaitFor demonstrates DI ordering).
 /// </summary>
 [Host]
 public sealed partial class MapHost : Node, IDependenciesResolved
 {
-    [Inject] private ILevelConfigService? _levelConfig;
+    [Inject] private ILevelRegistryService? _registry;
 
     [Provide(
         ExposedTypes = [typeof(IMapService)],
-        WaitFor      = [nameof(_levelConfig)]
+        WaitFor      = [nameof(_registry)]
     )]
     public MapService MapSvc => new MapService(
-        _levelConfig!.Config.MapWidth,
-        _levelConfig.Config.MapHeight,
-        _levelConfig.Config.Theme);
+        _registry!.ActiveLevel.MapWidth,
+        _registry.ActiveLevel.MapHeight,
+        _registry.ActiveLevel.Theme);
 
     public override partial void _Notification(int what);
 
     void IDependenciesResolved.OnDependenciesResolved(bool ok)
     {
-        if (ok) GD.Print($"[MapHost] Providing {_levelConfig!.Config.MapWidth}x{_levelConfig.Config.MapHeight} map ({_levelConfig.Config.Theme})");
-        else    GD.PrintErr("[MapHost] ILevelConfigService missing!");
+        if (!ok) { GD.PrintErr("[MapHost] ILevelRegistryService missing!"); return; }
+        var lvl = _registry!.ActiveLevel;
+        GD.Print($"[MapHost] {lvl.MapWidth}×{lvl.MapHeight} map, theme={lvl.Theme}");
     }
 }

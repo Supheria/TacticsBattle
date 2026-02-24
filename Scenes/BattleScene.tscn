@@ -1,30 +1,42 @@
-[gd_scene load_steps=8 format=3 uid="uid://b3at1l3sc3n3"]
+[gd_scene load_steps=11 format=3 uid="uid://btlscene001"]
 
-[ext_resource type="Script" uid="uid://dk57hqg8wpc3s" path="res://Scripts/Scope/BattleScope.cs" id="1_scope"]
-[ext_resource type="Script" uid="uid://cc2wan4ik7lj7" path="res://Scripts/Hosts/GameStateHost.cs" id="2_gshost"]
-[ext_resource type="Script" uid="uid://cttkuw2xkklya" path="res://Scripts/Hosts/MapHost.cs" id="3_maphost"]
-[ext_resource type="Script" uid="uid://bqxuigs8aqac4" path="res://Scripts/Hosts/BattleHost.cs" id="4_battlehost"]
-[ext_resource type="Script" uid="uid://8vmrx7xbymel" path="res://Scripts/Users/UnitManager.cs" id="5_unitmgr"]
-[ext_resource type="Script" uid="uid://dxhdfk0aip8mu" path="res://Scripts/Users/BattleUI.cs" id="6_battleui"]
-[ext_resource type="Script" uid="uid://23hdujajrpc3" path="res://Scripts/Users/AIController.cs" id="7_ai"]
+[ext_resource type="Script" uid="uid://btlscope001"  path="res://Scripts/Scope/BattleScope.cs"          id="1_scope"]
+[ext_resource type="Script" uid="uid://lvregh0002"   path="res://Scripts/Hosts/LevelRegistryHost.cs"    id="2_reg"]
+[ext_resource type="Script" uid="uid://scnrouth0002" path="res://Scripts/Hosts/SceneRouterHost.cs"      id="3_rtr"]
+[ext_resource type="Script" uid="uid://gshost0001"   path="res://Scripts/Hosts/GameStateHost.cs"        id="4_gs"]
+[ext_resource type="Script" uid="uid://maphost001"   path="res://Scripts/Hosts/MapHost.cs"              id="5_map"]
+[ext_resource type="Script" uid="uid://btlhost001"   path="res://Scripts/Hosts/BattleHost.cs"           id="6_btl"]
+[ext_resource type="Script" uid="uid://unitmgr001"   path="res://Scripts/Users/UnitManager.cs"          id="7_um"]
+[ext_resource type="Script" uid="uid://btlui0001"    path="res://Scripts/Users/BattleUI.cs"             id="8_ui"]
+[ext_resource type="Script" uid="uid://aictl0001"    path="res://Scripts/Users/AIController.cs"         id="9_ai"]
+[ext_resource type="Script" uid="uid://renderer01"   path="res://Scripts/Users/BattleRenderer3D.cs"     id="10_r"]
 
 [node name="BattleScene" type="Node"]
 script = ExtResource("1_scope")
 
+[node name="LevelRegistryHost" type="Node" parent="."]
+script = ExtResource("2_reg")
+
+[node name="SceneRouterHost" type="Node" parent="."]
+script = ExtResource("3_rtr")
+
 [node name="GameStateHost" type="Node" parent="."]
-script = ExtResource("2_gshost")
+script = ExtResource("4_gs")
 
 [node name="MapHost" type="Node" parent="."]
-script = ExtResource("3_maphost")
+script = ExtResource("5_map")
 
 [node name="BattleHost" type="Node" parent="."]
-script = ExtResource("4_battlehost")
+script = ExtResource("6_btl")
 
 [node name="UnitManager" type="Node" parent="."]
-script = ExtResource("5_unitmgr")
+script = ExtResource("7_um")
 
 [node name="BattleUI" type="CanvasLayer" parent="."]
-script = ExtResource("6_battleui")
+script = ExtResource("8_ui")
 
 [node name="AIController" type="Node" parent="."]
-script = ExtResource("7_ai")
+script = ExtResource("9_ai")
+
+[node name="BattleRenderer3D" type="Node3D" parent="."]
+script = ExtResource("10_r")

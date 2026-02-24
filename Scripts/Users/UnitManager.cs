@@ -7,59 +7,55 @@ using TacticsBattle.Services;
 namespace TacticsBattle.Users;
 
 /// <summary>
-/// DI User: reads ILevelConfigService to spawn units, then manages move/attack helpers.
-/// Injecting ILevelConfigService (alongside the three core services) is all that is
-/// needed to switch levels — no code changes beyond swapping the [Host] in the scope.
+/// DI User: spawns units from ILevelRegistryService.ActiveLevel.Units.
+/// No unit data, no stat numbers — all from LevelRegistry and UnitTemplateLibrary.
 /// </summary>
 [User]
 public sealed partial class UnitManager : Node, IDependenciesResolved
 {
-    [Inject] private IGameStateService?   _gameState;
-    [Inject] private IMapService?         _mapService;
-    [Inject] private IBattleService?      _battleService;
-    [Inject] private ILevelConfigService? _levelConfig;
+    [Inject] private IGameStateService?    _gameState;
+    [Inject] private IMapService?          _mapService;
+    [Inject] private IBattleService?       _battleService;
+    [Inject] private ILevelRegistryService? _registry;
 
     private int _nextId = 1;
 
     public override partial void _Notification(int what);
-
     public override void _Ready() => GD.Print("[UnitManager] Waiting for DI...");
 
     void IDependenciesResolved.OnDependenciesResolved(bool ok)
     {
         if (!ok) { GD.PrintErr("[UnitManager] DI FAILED."); return; }
-        SpawnInitialUnits();
+        SpawnUnits();
         SubscribeEvents();
         _gameState!.BeginPlayerTurn();
     }
 
-    private void SpawnInitialUnits()
+    private void SpawnUnits()
     {
-        foreach (var s in _levelConfig!.Config.Units)
-            Spawn(s.Name, s.Type, s.Team, s.Position);
-    }
-
-    private void Spawn(string name, UnitType type, Team team, Vector2I pos)
-    {
-        var unit = new Unit(_nextId++, name, type, team, pos);
-        _gameState!.AddUnit(unit);
-        _mapService!.PlaceUnit(unit, pos);
-        GD.Print($"  Spawned: {unit}");
+        var level = _registry!.ActiveLevel;
+        GD.Print($"[UnitManager] Spawning units for \"{level.Name}\"");
+        foreach (var s in level.Units)
+        {
+            var unit = new Unit(_nextId++, s.Name, s.Type, s.Team, s.Position);
+            _gameState!.AddUnit(unit);
+            _mapService!.PlaceUnit(unit, s.Position);
+            GD.Print($"  + {unit}");
+        }
     }
 
     private void SubscribeEvents()
     {
-        _battleService!.OnUnitDefeated     += u => GD.Print($"[UnitManager] ☠ {u.Name}");
-        _battleService.OnEnemyTurnFinished += ()  => GD.Print("[UnitManager] Enemy done.");
+        _battleService!.OnUnitDefeated    += u  => GD.Print($"[UnitManager] ☠ {u.Name}");
+        _battleService.OnEnemyTurnFinished += () => GD.Print("[UnitManager] Enemy done.");
     }
 
-    // ── Public helpers for BattleRenderer3D ──────────────────────────────────
+    // ── Public helpers called by BattleRenderer3D ─────────────────────────────
 
     public bool TryMoveSelected(Vector2I target)
     {
         if (_gameState?.SelectedUnit is not { Team: Team.Player, HasMoved: false } unit) return false;
         if (!_mapService!.GetReachableTiles(unit).Contains(target)) return false;
-        // FIX: also guard that destination is empty (no overlap)
         if (_mapService.GetUnitAt(target) != null) return false;
         _mapService.MoveUnit(unit, target);
         _gameState.NotifyUnitMoved(unit);
@@ -68,8 +64,8 @@ public sealed partial class UnitManager : Node, IDependenciesResolved
 
     public bool TryAttackTarget(Unit target)
     {
-        if (_gameState?.SelectedUnit is not { Team: Team.Player, HasAttacked: false } attacker) return false;
-        _battleService!.ExecuteAttack(attacker, target);
+        if (_gameState?.SelectedUnit is not { Team: Team.Player, HasAttacked: false } atk) return false;
+        _battleService!.ExecuteAttack(atk, target);
         return true;
     }
 }

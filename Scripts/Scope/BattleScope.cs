@@ -5,17 +5,21 @@ using TacticsBattle.Hosts;
 namespace TacticsBattle.Scope;
 
 /// <summary>
-/// Root DI scope for the battle scene.
-/// Lists all [Host] types that participate in dependency resolution.
-/// All [Host] and [User] nodes must be children (or descendants) of this node.
+/// Unified battle scope — used by ALL levels via a single BattleScene.tscn.
+/// Which level to play is communicated through SelectedLevel.Index (written
+/// by SceneRouterService before the scene loads).
+///
+/// Previously required Level1Scope + Level2Scope + Level3Scope (3 nearly
+/// identical files). Now one scope serves every level.
 /// </summary>
-[Modules(Hosts = [typeof(GameStateHost), typeof(MapHost), typeof(BattleHost)])]
+[Modules(Hosts = [
+    typeof(LevelRegistryHost),
+    typeof(SceneRouterHost),
+    typeof(GameStateHost),
+    typeof(MapHost),
+    typeof(BattleHost),
+])]
 public partial class BattleScope : Node, IScope
 {
     public override partial void _Notification(int what);
-
-    public override void _Ready()
-    {
-        GD.Print("[BattleScope] Scope initialised. DI wiring begins...");
-    }
 }

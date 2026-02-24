@@ -6,26 +6,22 @@ using TacticsBattle.Services;
 namespace TacticsBattle.Users;
 
 /// <summary>
-/// DI User — 2D HUD (CanvasLayer).
+/// DI User — 2D HUD overlay.
 ///
-/// Changes:
-///  • Pause menu: ESC toggles; uses GetTree().Paused so all other nodes freeze.
-///    ProcessMode = Always keeps this layer responsive while paused.
-///  • Movement-blocked indicator: unit info panel shows "⚠ No move tiles!" when
-///    a player unit has not yet moved but GetReachableTiles returns empty
-///    (surrounded or blocked by enemies at a choke-point).
-///  • End Turn button sync fixed: state read immediately after DI resolves.
-///  • Battle Log uses ScrollContainer with auto-scroll.
-///  • Game-over overlay has Play Again + Level Select buttons.
+/// Navigation calls go to ISceneRouterService — no scene paths here.
+/// Movement-blocked indicator uses IMapService.GetReachableTiles.
+/// Pause menu keeps ProcessMode=Always so ESC works while tree is paused.
 /// </summary>
 [User]
 public sealed partial class BattleUI : CanvasLayer, IDependenciesResolved
 {
-    [Inject] private IGameStateService? _gameState;
-    [Inject] private IBattleService?    _battleService;
-    [Inject] private IMapService?       _mapService;
+    [Inject] private IGameStateService?    _gameState;
+    [Inject] private IBattleService?       _battleService;
+    [Inject] private IMapService?          _mapService;
+    [Inject] private ISceneRouterService?  _router;
+    [Inject] private ILevelRegistryService? _registry;
 
-    // ── HUD ──────────────────────────────────────────────────────────────────
+    // ── HUD ───────────────────────────────────────────────────────────────────
     private Label?           _turnLabel;
     private Label?           _phaseLabel;
     private Button?          _endTurnButton;
@@ -40,31 +36,25 @@ public sealed partial class BattleUI : CanvasLayer, IDependenciesResolved
     private Label? _unitHp;
     private Label? _unitStats;
     private Label? _unitActions;
-    private Label? _unitBlocked;   // "⚠ No move tiles!" when surrounded
+    private Label? _unitBlocked;
 
-    // ── Game-over overlay ─────────────────────────────────────────────────────
+    // ── Overlays ──────────────────────────────────────────────────────────────
     private Panel? _gameOverPanel;
     private Label? _gameOverLabel;
-
-    // ── Pause overlay ─────────────────────────────────────────────────────────
     private Panel? _pausePanel;
 
     public override partial void _Notification(int what);
 
     public override void _Ready()
     {
-        // This layer must keep processing while the scene tree is paused
-        // so the ESC key can resume and buttons still work.
         ProcessMode = ProcessModeEnum.Always;
-
         BuildHud();
         BuildUnitInfoPanel();
         BuildGameOverPanel();
         BuildPausePanel();
     }
 
-    // ── Process: deferred log auto-scroll ─────────────────────────────────────
-    public override void _Process(double _delta)
+    public override void _Process(double _)
     {
         if (!_needsScroll || _logScroll == null) return;
         _logScroll.ScrollVertical = (int)(_logScroll.GetVScrollBar()?.MaxValue ?? 999999f);
@@ -74,6 +64,10 @@ public sealed partial class BattleUI : CanvasLayer, IDependenciesResolved
     void IDependenciesResolved.OnDependenciesResolved(bool ok)
     {
         if (!ok) { GD.PrintErr("[BattleUI] DI failed."); return; }
+
+        // Populate level name in HUD title
+        var lvl = _registry?.ActiveLevel;
+        if (lvl != null) AppendLog($"═ {lvl.Name} — {lvl.Difficulty} ═");
 
         _gameState!.OnPhaseChanged += phase =>
         {
@@ -98,13 +92,12 @@ public sealed partial class BattleUI : CanvasLayer, IDependenciesResolved
         _battleService.OnUnitDefeated += u =>
             AppendLog($"☠ {u.Name} defeated!");
 
-        // Sync state immediately — BeginPlayerTurn may have fired before we subscribed
+        // Sync immediately — BeginPlayerTurn may have already fired
         _endTurnButton!.Disabled = _gameState.Phase != GamePhase.PlayerTurn;
         _phaseLabel!.Text        = $"Phase: {_gameState.Phase}";
         _turnLabel!.Text         = $"Turn  {_gameState.CurrentTurn}";
     }
 
-    // ── Input: ESC = pause, Enter = end turn ──────────────────────────────────
     public override void _Input(InputEvent ev)
     {
         if (ev is InputEventKey { Pressed: true } key)
@@ -115,58 +108,49 @@ public sealed partial class BattleUI : CanvasLayer, IDependenciesResolved
                 GetViewport().SetInputAsHandled();
             }
             else if (key.Keycode == Key.Enter && !GetTree().Paused)
-            {
                 _gameState?.EndTurn();
-            }
         }
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    //  Pause logic
-    // ─────────────────────────────────────────────────────────────────────────
-
+    // ── Pause ─────────────────────────────────────────────────────────────────
     private void TogglePause()
     {
-        bool nowPaused        = !GetTree().Paused;
-        GetTree().Paused      = nowPaused;
-        _pausePanel!.Visible  = nowPaused;
+        bool p = !GetTree().Paused;
+        GetTree().Paused = p;
+        _pausePanel!.Visible = p;
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    //  UI construction
-    // ─────────────────────────────────────────────────────────────────────────
+    // ── UI construction ───────────────────────────────────────────────────────
 
     private void BuildHud()
     {
         var bg = new Panel { CustomMinimumSize = new Vector2(214, 0) };
-        bg.AnchorLeft  = 0f; bg.AnchorRight  = 0f;
-        bg.AnchorTop   = 0f; bg.AnchorBottom = 0f;
-        bg.OffsetLeft  = 8f; bg.OffsetTop    = 8f;
-        bg.OffsetRight = 222f; bg.OffsetBottom = 298f;
+        bg.AnchorLeft = 0; bg.AnchorTop = 0; bg.AnchorRight = 0; bg.AnchorBottom = 0;
+        bg.OffsetLeft = 8; bg.OffsetTop = 8; bg.OffsetRight = 222; bg.OffsetBottom = 298;
         AddChild(bg);
 
-        var vbox = new VBoxContainer();
-        vbox.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
-        vbox.AddThemeConstantOverride("separation", 4);
-        bg.AddChild(vbox);
+        var vb = new VBoxContainer();
+        vb.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+        vb.AddThemeConstantOverride("separation", 4);
+        bg.AddChild(vb);
 
-        vbox.AddChild(new Control { CustomMinimumSize = new Vector2(0, 4) });
-        _turnLabel  = Lbl("Turn  —",  14, bold: true);
-        _phaseLabel = Lbl("Phase: —", 12, bold: false);
-        vbox.AddChild(_turnLabel);
-        vbox.AddChild(_phaseLabel);
-        vbox.AddChild(new HSeparator());
+        vb.AddChild(new Control { CustomMinimumSize = new Vector2(0, 4) });
+        _turnLabel  = Lbl("Turn  —",  14, true);
+        _phaseLabel = Lbl("Phase: —", 12, false);
+        vb.AddChild(_turnLabel);
+        vb.AddChild(_phaseLabel);
+        vb.AddChild(new HSeparator());
 
-        _endTurnButton = new Button { Text = "End Turn  [Enter]", Disabled = false };
+        _endTurnButton = new Button { Text = "End Turn  [Enter]" };
         _endTurnButton.Pressed += () => _gameState?.EndTurn();
-        vbox.AddChild(_endTurnButton);
-        vbox.AddChild(new HSeparator());
-        vbox.AddChild(Lbl("Battle Log", 12, bold: true));
+        vb.AddChild(_endTurnButton);
+        vb.AddChild(new HSeparator());
+        vb.AddChild(Lbl("Battle Log", 12, true));
 
         _logScroll = new ScrollContainer { HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled };
-        _logScroll.CustomMinimumSize  = new Vector2(0, 150);
-        _logScroll.SizeFlagsVertical  = Control.SizeFlags.ExpandFill;
-        vbox.AddChild(_logScroll);
+        _logScroll.CustomMinimumSize = new Vector2(0, 150);
+        _logScroll.SizeFlagsVertical = Control.SizeFlags.ExpandFill;
+        vb.AddChild(_logScroll);
 
         _logLabel = new Label { AutowrapMode = TextServer.AutowrapMode.WordSmart };
         _logLabel.AddThemeFontSizeOverride("font_size", 11);
@@ -178,10 +162,10 @@ public sealed partial class BattleUI : CanvasLayer, IDependenciesResolved
     private void BuildUnitInfoPanel()
     {
         _unitPanel = new Panel { Visible = false };
-        _unitPanel.AnchorLeft   = 0f;  _unitPanel.AnchorTop    = 1f;
-        _unitPanel.AnchorRight  = 0f;  _unitPanel.AnchorBottom = 1f;
-        _unitPanel.OffsetLeft   = 8f;  _unitPanel.OffsetTop    = -120f;
-        _unitPanel.OffsetRight  = 336f; _unitPanel.OffsetBottom = -8f;
+        _unitPanel.AnchorLeft  = 0; _unitPanel.AnchorTop    = 1;
+        _unitPanel.AnchorRight = 0; _unitPanel.AnchorBottom = 1;
+        _unitPanel.OffsetLeft  = 8; _unitPanel.OffsetTop    = -124;
+        _unitPanel.OffsetRight = 340; _unitPanel.OffsetBottom = -8;
         AddChild(_unitPanel);
 
         var vb = new VBoxContainer();
@@ -190,19 +174,15 @@ public sealed partial class BattleUI : CanvasLayer, IDependenciesResolved
         _unitPanel.AddChild(vb);
 
         vb.AddChild(new Control { CustomMinimumSize = new Vector2(0, 4) });
-        _unitHeader  = Lbl("", 11, bold: false);
-        _unitName    = Lbl("", 15, bold: true);
-        _unitHp      = Lbl("", 12, bold: false);
-        _unitStats   = Lbl("", 11, bold: false);
-        _unitActions = Lbl("", 11, bold: false);
-        _unitBlocked = Lbl("", 11, bold: false);
+        _unitHeader  = Lbl("",  11, false);
+        _unitName    = Lbl("",  15, true);
+        _unitHp      = Lbl("",  12, false);
+        _unitStats   = Lbl("",  11, false);
+        _unitActions = Lbl("",  11, false);
+        _unitBlocked = Lbl("",  11, false);
         _unitBlocked.AddThemeColorOverride("font_color", new Color(1f, 0.6f, 0.2f));
-        vb.AddChild(_unitHeader);
-        vb.AddChild(_unitName);
-        vb.AddChild(_unitHp);
-        vb.AddChild(_unitStats);
-        vb.AddChild(_unitActions);
-        vb.AddChild(_unitBlocked);
+        vb.AddChild(_unitHeader); vb.AddChild(_unitName); vb.AddChild(_unitHp);
+        vb.AddChild(_unitStats);  vb.AddChild(_unitActions); vb.AddChild(_unitBlocked);
     }
 
     private void BuildGameOverPanel()
@@ -210,8 +190,8 @@ public sealed partial class BattleUI : CanvasLayer, IDependenciesResolved
         _gameOverPanel = new Panel { Visible = false };
         _gameOverPanel.AnchorLeft  = 0.5f; _gameOverPanel.AnchorRight  = 0.5f;
         _gameOverPanel.AnchorTop   = 0.5f; _gameOverPanel.AnchorBottom = 0.5f;
-        _gameOverPanel.OffsetLeft  = -190f; _gameOverPanel.OffsetRight  =  190f;
-        _gameOverPanel.OffsetTop   = -110f; _gameOverPanel.OffsetBottom =  110f;
+        _gameOverPanel.OffsetLeft  = -190; _gameOverPanel.OffsetRight  =  190;
+        _gameOverPanel.OffsetTop   = -110; _gameOverPanel.OffsetBottom =  110;
         AddChild(_gameOverPanel);
 
         var vb = new VBoxContainer();
@@ -220,44 +200,39 @@ public sealed partial class BattleUI : CanvasLayer, IDependenciesResolved
         _gameOverPanel.AddChild(vb);
 
         vb.AddChild(new Control { CustomMinimumSize = new Vector2(0, 8) });
-        _gameOverLabel = Lbl("", 26, bold: true);
+        _gameOverLabel = Lbl("", 26, true);
         _gameOverLabel.HorizontalAlignment = HorizontalAlignment.Center;
         vb.AddChild(_gameOverLabel);
 
-        var btnRow = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
-        btnRow.AddThemeConstantOverride("separation", 12);
-        vb.AddChild(btnRow);
+        var row = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
+        row.AddThemeConstantOverride("separation", 12);
+        vb.AddChild(row);
 
-        var again = new Button { Text = "Play Again" };
-        again.AddThemeFontSizeOverride("font_size", 16);
-        again.Pressed += () => { GetTree().Paused = false; GetTree().ReloadCurrentScene(); };
-        btnRow.AddChild(again);
+        var again = MenuBtn("Play Again");
+        again.Pressed += () => _router!.RestartBattle();
+        row.AddChild(again);
 
-        var menu = new Button { Text = "Level Select" };
-        menu.AddThemeFontSizeOverride("font_size", 16);
-        menu.Pressed += () => { GetTree().Paused = false; GetTree().ChangeSceneToFile("res://Scenes/LevelSelectScene.tscn"); };
-        btnRow.AddChild(menu);
+        var menu = MenuBtn("Level Select");
+        menu.Pressed += () => _router!.GoToMenu();
+        row.AddChild(menu);
     }
 
     private void BuildPausePanel()
     {
-        // Full-screen semi-transparent dim layer
         _pausePanel = new Panel { Visible = false };
         _pausePanel.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
         _pausePanel.ProcessMode = ProcessModeEnum.Always;
 
-        var style = new StyleBoxFlat();
-        style.BgColor = new Color(0f, 0f, 0f, 0.55f);
-        _pausePanel.AddThemeStyleboxOverride("panel", style);
+        var dimStyle = new StyleBoxFlat();
+        dimStyle.BgColor = new Color(0f, 0f, 0f, 0.55f);
+        _pausePanel.AddThemeStyleboxOverride("panel", dimStyle);
         AddChild(_pausePanel);
 
-        // Centred settings card
-        var card = new PanelContainer();
-        card.ProcessMode = ProcessModeEnum.Always;
+        var card = new PanelContainer { ProcessMode = ProcessModeEnum.Always };
         card.AnchorLeft  = 0.5f; card.AnchorRight  = 0.5f;
         card.AnchorTop   = 0.5f; card.AnchorBottom = 0.5f;
-        card.OffsetLeft  = -160f; card.OffsetRight  =  160f;
-        card.OffsetTop   = -140f; card.OffsetBottom =  140f;
+        card.OffsetLeft  = -160; card.OffsetRight  =  160;
+        card.OffsetTop   = -150; card.OffsetBottom =  150;
         _pausePanel.AddChild(card);
 
         var cardStyle = new StyleBoxFlat();
@@ -268,47 +243,46 @@ public sealed partial class BattleUI : CanvasLayer, IDependenciesResolved
         cardStyle.SetContentMarginAll(20);
         card.AddThemeStyleboxOverride("panel", cardStyle);
 
-        var vb = new VBoxContainer();
+        var vb = new VBoxContainer { ProcessMode = ProcessModeEnum.Always };
         vb.AddThemeConstantOverride("separation", 14);
         card.AddChild(vb);
 
-        // Title
-        var title = Lbl("⏸  PAUSED", 22, bold: true);
+        var title = Lbl("⏸  PAUSED", 22, true);
         title.HorizontalAlignment = HorizontalAlignment.Center;
         vb.AddChild(title);
 
-        var hint = Lbl("Press ESC to resume", 12, bold: false);
+        // Show which level is paused
+        var lvlName = _registry?.ActiveLevel.Name ?? "";
+        var sub = Lbl(lvlName, 13, false);
+        sub.HorizontalAlignment = HorizontalAlignment.Center;
+        sub.AddThemeColorOverride("font_color", new Color(0.6f, 0.65f, 0.75f));
+        vb.AddChild(sub);
+
+        var hint = Lbl("ESC to resume", 11, false);
         hint.HorizontalAlignment = HorizontalAlignment.Center;
-        hint.AddThemeColorOverride("font_color", new Color(0.6f, 0.65f, 0.75f));
+        hint.AddThemeColorOverride("font_color", new Color(0.45f, 0.50f, 0.60f));
         vb.AddChild(hint);
 
         vb.AddChild(new HSeparator());
 
-        var resume = MakeMenuBtn("▶  Resume");
+        var resume  = MenuBtn("▶  Resume");
         resume.Pressed += TogglePause;
         vb.AddChild(resume);
 
-        var restart = MakeMenuBtn("↺  Restart Level");
-        restart.Pressed += () => { GetTree().Paused = false; GetTree().ReloadCurrentScene(); };
+        var restart = MenuBtn("↺  Restart Level");
+        restart.Pressed += () => _router!.RestartBattle();
         vb.AddChild(restart);
 
-        var lvlSelect = MakeMenuBtn("☰  Level Select");
-        lvlSelect.Pressed += () =>
-        {
-            GetTree().Paused = false;
-            GetTree().ChangeSceneToFile("res://Scenes/LevelSelectScene.tscn");
-        };
-        vb.AddChild(lvlSelect);
+        var toMenu  = MenuBtn("☰  Level Select");
+        toMenu.Pressed += () => _router!.GoToMenu();
+        vb.AddChild(toMenu);
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    //  Unit info / selection display
-    // ─────────────────────────────────────────────────────────────────────────
+    // ── Event handlers ────────────────────────────────────────────────────────
 
     private void ShowUnitInfo(Unit? unit)
     {
         if (unit == null) { _unitPanel!.Visible = false; return; }
-
         _unitPanel!.Visible = true;
         bool isPlayer = unit.Team == Team.Player;
 
@@ -323,18 +297,12 @@ public sealed partial class BattleUI : CanvasLayer, IDependenciesResolved
             ? $"Move {(unit.HasMoved ? "✓" : "●")}    Attack {(unit.HasAttacked ? "✓" : "●")}"
             : "";
 
-        // Movement-blocked indicator (only meaningful for own units that haven't moved)
         if (isPlayer && !unit.HasMoved && _mapService != null)
-        {
-            var reach = _mapService.GetReachableTiles(unit);
-            _unitBlocked!.Text = reach.Count == 0
-                ? "⚠ No move tiles — path blocked by enemies!"
+            _unitBlocked!.Text = _mapService.GetReachableTiles(unit).Count == 0
+                ? "⚠ Path blocked — no move tiles available!"
                 : "";
-        }
         else
-        {
             _unitBlocked!.Text = "";
-        }
     }
 
     private void ShowGameOver(bool victory)
@@ -345,9 +313,7 @@ public sealed partial class BattleUI : CanvasLayer, IDependenciesResolved
             : "💀  DEFEAT!\nAll your units were lost.";
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    //  Log helpers
-    // ─────────────────────────────────────────────────────────────────────────
+    // ── Log ───────────────────────────────────────────────────────────────────
 
     private const int MaxLog = 60;
     private readonly System.Collections.Generic.List<string> _logLines = new();
@@ -360,9 +326,7 @@ public sealed partial class BattleUI : CanvasLayer, IDependenciesResolved
         _needsScroll = true;
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    //  Shared factory helpers
-    // ─────────────────────────────────────────────────────────────────────────
+    // ── Factories ─────────────────────────────────────────────────────────────
 
     private static Label Lbl(string text, int size, bool bold)
     {
@@ -372,11 +336,10 @@ public sealed partial class BattleUI : CanvasLayer, IDependenciesResolved
         return l;
     }
 
-    private static Button MakeMenuBtn(string text)
+    private static Button MenuBtn(string text)
     {
-        var b = new Button { Text = text };
+        var b = new Button { Text = text, ProcessMode = ProcessModeEnum.Always };
         b.AddThemeFontSizeOverride("font_size", 16);
-        b.ProcessMode = ProcessModeEnum.Always;
         return b;
     }
 }
