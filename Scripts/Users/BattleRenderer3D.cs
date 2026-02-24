@@ -8,76 +8,73 @@ using TacticsBattle.Services;
 namespace TacticsBattle.Users;
 
 /// <summary>
-/// DI User: builds the entire 3D world (camera, lighting, tile grid, unit meshes)
-/// and handles all player mouse input via PhysicsRaycast.
+/// DI User — builds the entire 3D world and handles mouse input.
 ///
-/// Interaction flow:
-///   Idle         → click player unit   → UnitSelected (show move + attack highlights)
-///   UnitSelected → click move tile     → unit moves,  re-highlight attackable targets
-///   UnitSelected → click enemy unit    → unit attacks, return to Idle
-///   UnitSelected → click elsewhere     → deselect, return to Idle
+/// Bugs fixed vs first version:
+///   • Highlight logic: respects HasMoved / HasAttacked; auto-deselects when
+///     no actions remain after a move; clears on every transition.
+///   • Unit visuals: smaller footprint (0.26 f), per-team base ring, per-type
+///     silhouette shape → far less visual overlap on the isometric camera.
+///   • Label3D HP text now 30 pt; HP bar doubled in height.
 /// </summary>
 [User]
 public sealed partial class BattleRenderer3D : Node3D, IDependenciesResolved
 {
-    // ── DI injections ────────────────────────────────────────────────────────
     [Inject] private IGameStateService? _gameState;
     [Inject] private IMapService?       _mapService;
     [Inject] private IBattleService?    _battleService;
 
     public override partial void _Notification(int what);
 
-    // ── Constants ────────────────────────────────────────────────────────────
-    private const float TileSize   = 1.15f;   // world-space distance between tile centres
-    private const float TileH      = 0.18f;   // tile mesh height
-    private const float UnitRadius = 0.22f;   // unit mesh base radius
-    private const float DamageShowSec = 1.5f; // seconds to show floating damage label
+    // ── Layout constants ──────────────────────────────────────────────────
+    private const float TileSize      = 1.20f;
+    private const float TileH         = 0.16f;
+    private const float DamageShowSec = 1.8f;
 
-    // ── Tile colours ─────────────────────────────────────────────────────────
-    private static readonly Color ColGrass    = new(0.32f, 0.62f, 0.28f);
-    private static readonly Color ColForest   = new(0.14f, 0.42f, 0.16f);
-    private static readonly Color ColMountain = new(0.56f, 0.52f, 0.46f);
-    private static readonly Color ColWater    = new(0.18f, 0.40f, 0.78f);
+    // ── Tile colours ──────────────────────────────────────────────────────
+    private static readonly Color ColGrass    = new(0.30f, 0.60f, 0.25f);
+    private static readonly Color ColForest   = new(0.12f, 0.40f, 0.14f);
+    private static readonly Color ColMountain = new(0.54f, 0.50f, 0.44f);
+    private static readonly Color ColWater    = new(0.16f, 0.38f, 0.76f);
 
-    // ── Highlight colours ────────────────────────────────────────────────────
-    private static readonly Color ColSelected   = new(1.00f, 0.90f, 0.10f);
-    private static readonly Color ColMoveable   = new(0.20f, 0.85f, 1.00f, 0.80f);
-    private static readonly Color ColAttackable = new(1.00f, 0.20f, 0.15f, 0.85f);
+    // ── Highlight colours ─────────────────────────────────────────────────
+    private static readonly Color ColSelected   = new(1.00f, 0.92f, 0.08f);
+    private static readonly Color ColMoveable   = new(0.20f, 0.88f, 1.00f, 0.80f);
+    private static readonly Color ColAttackable = new(1.00f, 0.18f, 0.12f, 0.85f);
 
-    // ── Unit colours (Player / Enemy × type) ─────────────────────────────────
-    private static Color UnitColor(Team team, UnitType type) => (team, type) switch
+    // ── Unit body colours ─────────────────────────────────────────────────
+    private static Color BodyColor(Team team, UnitType type) => (team, type) switch
     {
-        (Team.Player, UnitType.Warrior) => new Color(0.20f, 0.45f, 0.92f),
-        (Team.Player, UnitType.Archer)  => new Color(0.10f, 0.72f, 0.82f),
-        (Team.Player, UnitType.Mage)    => new Color(0.70f, 0.20f, 0.92f),
-        (Team.Enemy,  UnitType.Warrior) => new Color(0.90f, 0.18f, 0.18f),
-        (Team.Enemy,  UnitType.Archer)  => new Color(0.92f, 0.52f, 0.08f),
-        (Team.Enemy,  UnitType.Mage)    => new Color(0.80f, 0.10f, 0.50f),
+        (Team.Player, UnitType.Warrior) => new Color(0.18f, 0.42f, 0.90f),
+        (Team.Player, UnitType.Archer)  => new Color(0.08f, 0.72f, 0.82f),
+        (Team.Player, UnitType.Mage)    => new Color(0.68f, 0.18f, 0.90f),
+        (Team.Enemy,  UnitType.Warrior) => new Color(0.88f, 0.16f, 0.16f),
+        (Team.Enemy,  UnitType.Archer)  => new Color(0.90f, 0.50f, 0.08f),
+        (Team.Enemy,  UnitType.Mage)    => new Color(0.80f, 0.08f, 0.50f),
         _                               => Colors.White,
     };
 
-    // ── Scene nodes ──────────────────────────────────────────────────────────
-    private Camera3D?        _camera;
-    private DirectionalLight3D? _sun;
-    private readonly Dictionary<Vector2I, TileData>  _tiles   = new();
-    private readonly Dictionary<int,      UnitVisual> _unitVis = new();  // unit.Id → visual
+    private static Color TeamRingColor(Team t) =>
+        t == Team.Player ? new Color(0.25f, 0.55f, 1.00f) : new Color(1.00f, 0.30f, 0.20f);
 
-    // ── Input state ──────────────────────────────────────────────────────────
+    // ── Scene nodes ───────────────────────────────────────────────────────
+    private Camera3D? _camera;
+    private readonly Dictionary<Vector2I, TileData>   _tiles   = new();
+    private readonly Dictionary<int,      UnitVisual>  _unitVis = new();
+
+    // ── Input state machine ───────────────────────────────────────────────
     private enum InputState { Idle, UnitSelected }
-    private InputState _inputState = InputState.Idle;
+    private InputState     _inputState  = InputState.Idle;
+    private List<Vector2I> _moveTiles   = new();
+    private List<Unit>     _attackUnits = new();
 
-    private List<Vector2I> _moveTiles    = new();
-    private List<Unit>     _attackUnits  = new();
-
-    // ── DI lifecycle ─────────────────────────────────────────────────────────
-    private bool _diReady    = false;
-    private bool _worldBuilt = false;
+    // ── Deferred build ────────────────────────────────────────────────────
+    private bool _diReady = false, _worldBuilt = false;
 
     void IDependenciesResolved.OnDependenciesResolved(bool ok)
     {
-        if (!ok) { GD.PrintErr("[BattleRenderer3D] DI failed."); return; }
+        if (!ok) { GD.PrintErr("[Renderer3D] DI failed."); return; }
         _diReady = true;
-        GD.Print("[BattleRenderer3D] DI ready.");
     }
 
     public override void _Process(double _delta)
@@ -87,53 +84,46 @@ public sealed partial class BattleRenderer3D : Node3D, IDependenciesResolved
         _worldBuilt = true;
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────
     //  World construction
-    // ─────────────────────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────
 
     private void BuildWorld()
     {
         SetupCamera();
         SetupLighting();
-        SetupSkyAmbient();
+        SetupEnvironment();
         BuildTileGrid();
-        BuildUnitMeshes();
+        BuildExistingUnits();
         SubscribeEvents();
-        GD.Print("[BattleRenderer3D] 3D world built.");
     }
 
     private void SetupCamera()
     {
-        _camera = new Camera3D();
+        _camera = new Camera3D { Fov = 45f };
         float cx = (_mapService!.MapWidth  - 1) * TileSize * 0.5f;
-        float cz = (_mapService.MapHeight - 1) * TileSize * 0.5f;
-        _camera.Position  = new Vector3(cx - 1f, 11f, cz + 8f);
-        _camera.RotationDegrees = new Vector3(-52f, 0f, 0f);
-        _camera.Fov = 45f;
+        float cz = (_mapService.MapHeight  - 1) * TileSize * 0.5f;
+        _camera.Position       = new Vector3(cx - 0.5f, 12f, cz + 9f);
+        _camera.RotationDegrees = new Vector3(-54f, 0f, 0f);
         AddChild(_camera);
     }
 
     private void SetupLighting()
     {
-        _sun = new DirectionalLight3D();
-        _sun.RotationDegrees = new Vector3(-55f, 45f, 0f);
-        _sun.LightEnergy     = 1.4f;
-        _sun.ShadowEnabled   = true;
-        AddChild(_sun);
+        var sun = new DirectionalLight3D { LightEnergy = 1.35f, ShadowEnabled = true };
+        sun.RotationDegrees = new Vector3(-55f, 42f, 0f);
+        AddChild(sun);
     }
 
-    private void SetupSkyAmbient()
+    private void SetupEnvironment()
     {
-        // World environment for ambient light
-        var env  = new Godot.Environment();
+        var env = new Godot.Environment();
         env.AmbientLightSource = Godot.Environment.AmbientSource.Color;
         env.AmbientLightColor  = new Color(0.55f, 0.65f, 0.80f);
         env.AmbientLightEnergy = 0.55f;
         env.BackgroundMode     = Godot.Environment.BGMode.Color;
-        env.BackgroundColor    = new Color(0.35f, 0.55f, 0.80f);
-
-        var we = new WorldEnvironment { Environment = env };
-        AddChild(we);
+        env.BackgroundColor    = new Color(0.35f, 0.52f, 0.80f);
+        AddChild(new WorldEnvironment { Environment = env });
     }
 
     private void BuildTileGrid()
@@ -141,299 +131,332 @@ public sealed partial class BattleRenderer3D : Node3D, IDependenciesResolved
         for (int gx = 0; gx < _mapService!.MapWidth;  gx++)
         for (int gz = 0; gz < _mapService.MapHeight; gz++)
         {
-            var gridPos = new Vector2I(gx, gz);
-            var tile    = _mapService.GetTile(gx, gz);
-            float wy    = tile.Type switch
-            {
-                TileType.Water    => -0.12f,
-                TileType.Mountain =>  0.10f,
-                TileType.Forest   =>  0.04f,
-                _                 =>  0.00f,
-            };
+            var gp   = new Vector2I(gx, gz);
+            var tile = _mapService.GetTile(gx, gz);
+            float wy = TileWorldY(gp);
 
-            // StaticBody3D = needed for raycasting
-            var body = new StaticBody3D();
-            body.Position = new Vector3(gx * TileSize, wy, gz * TileSize);
+            var body = new StaticBody3D { Position = new Vector3(gx * TileSize, wy, gz * TileSize) };
             body.SetMeta("gx", gx);
             body.SetMeta("gz", gz);
 
-            // Collision shape
-            var shape = new CollisionShape3D();
-            var box   = new BoxShape3D();
-            box.Size  = new Vector3(TileSize * 0.96f, TileH, TileSize * 0.96f);
-            shape.Shape = box;
-            body.AddChild(shape);
+            var col = new CollisionShape3D();
+            var box = new BoxShape3D { Size = new Vector3(TileSize * 0.96f, TileH, TileSize * 0.96f) };
+            col.Shape = box;
+            body.AddChild(col);
 
-            // Mesh
-            var mesh   = new MeshInstance3D();
-            var bMesh  = new BoxMesh();
-            bMesh.Size = new Vector3(TileSize * 0.96f, TileH, TileSize * 0.96f);
-            mesh.Mesh  = bMesh;
-            var mat    = MakeMat(TileColor(tile.Type), true);
+            var mesh = new MeshInstance3D();
+            var bm   = new BoxMesh { Size = new Vector3(TileSize * 0.96f, TileH, TileSize * 0.96f) };
+            mesh.Mesh = bm;
+            var baseCol = TileColor(tile.Type);
+            var mat     = MakeMat(baseCol, rougher: true);
             mesh.MaterialOverride = mat;
             body.AddChild(mesh);
 
             AddChild(body);
-            _tiles[gridPos] = new TileData(body, mesh, mat, TileColor(tile.Type));
+            _tiles[gp] = new TileData(body, mesh, mat, baseCol);
         }
     }
 
-    private void BuildUnitMeshes()
+    private void BuildExistingUnits()
     {
-        // Called once after DI fires — at this point AllUnits may already be populated
-        // (if UnitManager's OnDependenciesResolved fired first). Either way,
-        // we also subscribe OnTurnStarted to catch the first population.
         foreach (var u in _gameState!.AllUnits)
             EnsureUnitVisual(u);
     }
 
+    // ─────────────────────────────────────────────────────────────────────
+    //  Event subscriptions
+    // ─────────────────────────────────────────────────────────────────────
+
     private void SubscribeEvents()
     {
+        // Spawn unit visuals once the first turn fires (units spawn just before)
         _gameState!.OnTurnStarted += _ =>
         {
-            // Rebuild unit visuals for any newly spawned units
-            foreach (var u in _gameState.AllUnits)
-                EnsureUnitVisual(u);
-            RefreshHighlights();
+            foreach (var u in _gameState.AllUnits) EnsureUnitVisual(u);
         };
 
-        _gameState.OnPhaseChanged += phase =>
-        {
-            if (phase is GamePhase.EnemyTurn)
-                ClearHighlights(clearSelection: true);
-            else if (phase is GamePhase.PlayerTurn)
-            {
-                // Sync positions after enemy AI moved things
-                foreach (var u in _gameState.AllUnits)
-                    SyncUnitVisualPosition(u);
-            }
-        };
-
+        // FIX #5: Clear + recompute highlights respecting HasMoved / HasAttacked
         _gameState.OnSelectionChanged += unit =>
         {
-            ClearHighlights(clearSelection: false);
-            if (unit != null)
-            {
-                HighlightTile(unit.Position, ColSelected);
-                foreach (var t in _mapService!.GetReachableTiles(unit))
-                    HighlightTile(t, ColMoveable);
-                foreach (var e in _mapService.GetAttackableTargets(unit))
-                    HighlightTile(e.Position, ColAttackable);
-                _moveTiles   = _mapService.GetReachableTiles(unit);
-                _attackUnits = _mapService.GetAttackableTargets(unit);
-            }
-        };
+            ClearHighlights();
+            if (unit == null) return;
 
-        _gameState.OnUnitMoved += unit =>
-        {
-            SyncUnitVisualPosition(unit);
-            // Re-show attack highlights if this unit is still selected
-            if (_gameState.SelectedUnit == unit)
+            HighlightTile(unit.Position, ColSelected);
+
+            if (!unit.HasMoved)
             {
-                ClearHighlights(clearSelection: false);
-                HighlightTile(unit.Position, ColSelected);
+                _moveTiles = _mapService!.GetReachableTiles(unit);
+                foreach (var t in _moveTiles) HighlightTile(t, ColMoveable);
+            }
+            else _moveTiles = new();
+
+            if (!unit.HasAttacked)
+            {
                 _attackUnits = _mapService!.GetAttackableTargets(unit);
                 foreach (var e in _attackUnits) HighlightTile(e.Position, ColAttackable);
-                _moveTiles = new List<Vector2I>(); // already moved
+            }
+            else _attackUnits = new();
+        };
+
+        // FIX #5: After move, re-evaluate what actions remain
+        _gameState.OnUnitMoved += unit =>
+        {
+            SyncUnitWorldPos(unit);
+
+            if (_gameState.SelectedUnit != unit) return;
+
+            // No actions left? Auto-deselect.
+            if (unit.HasMoved && unit.HasAttacked)
+            {
+                _gameState.SelectedUnit = null;   // fires OnSelectionChanged(null) → ClearHighlights
+                _inputState = InputState.Idle;
+                return;
+            }
+
+            // Show only remaining possible actions
+            ClearHighlights();
+            HighlightTile(unit.Position, ColSelected);
+            _moveTiles = new();  // already moved
+
+            if (!unit.HasAttacked)
+            {
+                _attackUnits = _mapService!.GetAttackableTargets(unit);
+                foreach (var e in _attackUnits) HighlightTile(e.Position, ColAttackable);
+            }
+            else _attackUnits = new();
+
+            // No attack targets AND already moved → auto-deselect
+            if (_attackUnits.Count == 0)
+            {
+                _gameState.SelectedUnit = null;
+                _inputState = InputState.Idle;
             }
         };
 
-        _battleService!.OnAttackExecuted += (attacker, defender, dmg) =>
+        // FIX #5: Always clear on phase changes
+        _gameState.OnPhaseChanged += phase =>
         {
-            SyncUnitVisualPosition(attacker);
-            UpdateUnitLabel(attacker);
-            UpdateUnitLabel(defender);
-            ShowFloatingDamage(defender, dmg);
+            if (phase is GamePhase.EnemyTurn or GamePhase.PlayerTurn)
+            {
+                _gameState.SelectedUnit = null;   // fires ClearHighlights via OnSelectionChanged
+                _inputState = InputState.Idle;
+            }
+            if (phase == GamePhase.PlayerTurn)
+            {
+                // Sync all unit positions after enemy AI has moved things
+                foreach (var u in _gameState.AllUnits) SyncUnitWorldPos(u);
+            }
+        };
+
+        _battleService!.OnAttackExecuted += (atk, def, dmg) =>
+        {
+            SyncUnitWorldPos(atk);
+            RefreshHpBar(atk);
+            RefreshHpBar(def);
+            ShowFloatingDamage(def, dmg);
         };
 
         _battleService.OnUnitDefeated += unit =>
         {
-            if (_unitVis.TryGetValue(unit.Id, out var vis))
-            {
-                vis.Root.QueueFree();
-                _unitVis.Remove(unit.Id);
-            }
-            ClearHighlights(clearSelection: true);
+            if (_unitVis.TryGetValue(unit.Id, out var vis)) { vis.Root.QueueFree(); _unitVis.Remove(unit.Id); }
+            _gameState.SelectedUnit = null;
             _inputState = InputState.Idle;
         };
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────
     //  Mouse input
-    // ─────────────────────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────
 
     public override void _UnhandledInput(InputEvent ev)
     {
         if (!_worldBuilt) return;
-        if (ev is not InputEventMouseButton mb) return;
-        if (!mb.Pressed || mb.ButtonIndex != MouseButton.Left) return;
+        if (ev is not InputEventMouseButton { Pressed: true, ButtonIndex: MouseButton.Left } mb) return;
+        if (_gameState!.Phase is GamePhase.EnemyTurn or GamePhase.Victory or GamePhase.Defeat) return;
 
-        // Ignore clicks when it's not player turn or game is over
-        if (_gameState!.Phase is GamePhase.EnemyTurn or GamePhase.Victory or GamePhase.Defeat)
-            return;
-
-        var hit = RaycastFromMouse(mb.Position);
-        if (hit == null) return;
-
-        HandleGridClick(hit.Value);
+        var hit = RaycastTile(mb.Position);
+        if (hit.HasValue) HandleClick(hit.Value);
     }
 
-    private Vector2I? RaycastFromMouse(Vector2 mousePos)
+    private Vector2I? RaycastTile(Vector2 mousePos)
     {
         if (_camera == null) return null;
-        var viewport = GetViewport();
-        var space    = GetWorld3D().DirectSpaceState;
-
-        var from = _camera.ProjectRayOrigin(mousePos);
-        var to   = from + _camera.ProjectRayNormal(mousePos) * 200f;
-
-        var query = PhysicsRayQueryParameters3D.Create(from, to);
-        query.CollideWithBodies = true;
+        var space  = GetWorld3D().DirectSpaceState;
+        var origin = _camera.ProjectRayOrigin(mousePos);
+        var dest   = origin + _camera.ProjectRayNormal(mousePos) * 220f;
+        var query  = PhysicsRayQueryParameters3D.Create(origin, dest);
         var result = space.IntersectRay(query);
         if (result.Count == 0) return null;
-
-        var collider = result["collider"].As<StaticBody3D>();
-        if (collider == null) return null;
-
-        int gx = collider.GetMeta("gx").AsInt32();
-        int gz = collider.GetMeta("gz").AsInt32();
-        return new Vector2I(gx, gz);
+        var col = result["collider"].As<StaticBody3D>();
+        if (col == null) return null;
+        return new Vector2I(col.GetMeta("gx").AsInt32(), col.GetMeta("gz").AsInt32());
     }
 
-    private void HandleGridClick(Vector2I gridPos)
+    private void HandleClick(Vector2I gp)
     {
         var unitMgr = GetParent().GetNodeOrNull<UnitManager>("UnitManager");
 
         switch (_inputState)
         {
             case InputState.Idle:
-                TrySelectUnit(gridPos);
+                TrySelect(gp);
                 break;
 
             case InputState.UnitSelected:
                 var sel = _gameState!.SelectedUnit;
                 if (sel == null) { _inputState = InputState.Idle; return; }
 
-                // Click on an attackable enemy
-                var enemy = _attackUnits.Find(u => u.Position == gridPos);
-                if (enemy != null)
+                // ── Attack? ───────────────────────────────────────────────
+                var victim = _attackUnits.Find(u => u.Position == gp);
+                if (victim != null)
                 {
-                    unitMgr?.TryAttackTarget(enemy);
+                    unitMgr?.TryAttackTarget(victim);
+                    // FIX #5: always clear after attack — OnSelectionChanged handles it
                     _gameState.SelectedUnit = null;
                     _inputState = InputState.Idle;
-                    ClearHighlights(clearSelection: true);
                     return;
                 }
 
-                // Click on a reachable empty tile
-                if (_moveTiles.Contains(gridPos) && _mapService!.GetUnitAt(gridPos) == null)
+                // ── Move? ─────────────────────────────────────────────────
+                if (_moveTiles.Contains(gp) && _mapService!.GetUnitAt(gp) == null)
                 {
-                    unitMgr?.TryMoveSelected(gridPos);
-                    // Remain in UnitSelected state so player can still attack
-                    // _gameState.OnUnitMoved event will refresh highlights
+                    unitMgr?.TryMoveSelected(gp);
+                    // OnUnitMoved fires → recalculates state
                     return;
                 }
 
-                // Click on same unit → deselect
-                if (gridPos == sel.Position)
+                // ── Tap own unit again → deselect ─────────────────────────
+                if (gp == sel.Position)
                 {
                     _gameState.SelectedUnit = null;
                     _inputState = InputState.Idle;
-                    ClearHighlights(clearSelection: true);
                     return;
                 }
 
-                // Click on another own player unit → switch selection
-                var other = _mapService!.GetUnitAt(gridPos);
-                if (other != null && other.Team == Team.Player)
+                // ── Switch to another own unit ────────────────────────────
+                var other = _mapService!.GetUnitAt(gp);
+                if (other != null && other.Team == Team.Player && other.IsAlive)
                 {
                     _gameState.SelectedUnit = other;
                     _inputState = InputState.UnitSelected;
                     return;
                 }
 
-                // Click elsewhere → deselect
+                // ── Click elsewhere → deselect ────────────────────────────
                 _gameState.SelectedUnit = null;
                 _inputState = InputState.Idle;
-                ClearHighlights(clearSelection: true);
                 break;
         }
     }
 
-    private void TrySelectUnit(Vector2I gridPos)
+    private void TrySelect(Vector2I gp)
     {
-        var unit = _mapService!.GetUnitAt(gridPos);
+        var unit = _mapService!.GetUnitAt(gp);
         if (unit == null || unit.Team != Team.Player || !unit.IsAlive) return;
-
         _gameState!.SelectedUnit = unit;
         _inputState = InputState.UnitSelected;
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    //  Visual helpers
-    // ─────────────────────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────
+    //  Unit visuals (FIX #4 + #6)
+    // ─────────────────────────────────────────────────────────────────────
+
+    // FIX #6: per-type body dimensions — narrow footprint reduces visual overlap
+    private static (float w, float h, float d) BodyDims(UnitType type) => type switch
+    {
+        UnitType.Warrior => (0.34f, 0.68f, 0.34f),
+        UnitType.Archer  => (0.24f, 0.64f, 0.24f),
+        UnitType.Mage    => (0.20f, 0.84f, 0.20f),
+        _                => (0.28f, 0.68f, 0.28f),
+    };
 
     private void EnsureUnitVisual(Unit unit)
     {
         if (_unitVis.ContainsKey(unit.Id)) return;
 
-        var root = new Node3D();
-        root.Name = $"Unit_{unit.Id}";
+        var root = new Node3D { Name = $"Unit_{unit.Id}" };
 
-        // Body mesh
-        var meshInst = new MeshInstance3D();
-        var (w, h, d) = unit.Type switch
-        {
-            UnitType.Warrior => (0.48f, 0.78f, 0.48f),
-            UnitType.Archer  => (0.32f, 0.68f, 0.32f),
-            UnitType.Mage    => (0.28f, 0.92f, 0.28f),
-            _                => (0.40f, 0.70f, 0.40f),
-        };
-        var bm = new BoxMesh(); bm.Size = new Vector3(w, h, d);
-        meshInst.Mesh = bm;
-        meshInst.MaterialOverride = MakeMat(UnitColor(unit.Team, unit.Type));
-        meshInst.Position = new Vector3(0, h * 0.5f, 0);
-        root.AddChild(meshInst);
+        // FIX #6: Team-colour base ring (flat cylinder) — instantly shows team
+        var ringMesh = new CylinderMesh { TopRadius = 0.42f, BottomRadius = 0.42f, Height = 0.06f, RadialSegments = 20 };
+        var ringInst = new MeshInstance3D { Mesh = ringMesh };
+        ringInst.MaterialOverride = MakeMat(TeamRingColor(unit.Team));
+        ringInst.Position = new Vector3(0, 0.03f, 0);
+        root.AddChild(ringInst);
 
-        // HP bar background
-        var barBg = new MeshInstance3D();
-        var barBgM = new BoxMesh(); barBgM.Size = new Vector3(0.8f, 0.06f, 0.06f);
-        barBg.Mesh = barBgM;
-        barBg.MaterialOverride = MakeMat(new Color(0.2f, 0.2f, 0.2f));
-        barBg.Position = new Vector3(0, h + 0.15f, 0);
+        // FIX #6: per-type body shape (BoxMesh) with narrow dimensions
+        var (bw, bh, bd) = BodyDims(unit.Type);
+        var bodyMesh = new BoxMesh { Size = new Vector3(bw, bh, bd) };
+        var bodyInst = new MeshInstance3D { Mesh = bodyMesh };
+        bodyInst.MaterialOverride = MakeMat(BodyColor(unit.Team, unit.Type));
+        bodyInst.Position = new Vector3(0, bh * 0.5f + 0.06f, 0);
+        root.AddChild(bodyInst);
+
+        // FIX #6: unit type indicator on top (small diamond / sphere / spike)
+        var topY = bh + 0.06f + 0.12f;
+        var topInst = MakeTypeTop(unit.Type, unit.Team, topY);
+        root.AddChild(topInst);
+
+        // FIX #4: HP bar — doubled height (0.10f), label 30 pt
+        float barY = bh + 0.06f + 0.28f;
+        var barBg = MakeBarMesh(new Color(0.15f, 0.15f, 0.15f), new Vector3(0.72f, 0.10f, 0.07f));
+        barBg.Position = new Vector3(0, barY, 0);
         barBg.Name = "HpBarBg";
         root.AddChild(barBg);
 
-        // HP bar fill
-        var barFill = new MeshInstance3D();
-        var barFillM = new BoxMesh(); barFillM.Size = new Vector3(0.8f, 0.06f, 0.065f);
-        barFill.Mesh = barFillM;
-        barFill.MaterialOverride = MakeMat(new Color(0.15f, 0.9f, 0.15f));
-        barFill.Position = new Vector3(0, h + 0.15f, 0);
+        var barFill = MakeBarMesh(new Color(0.15f, 0.90f, 0.15f), new Vector3(0.72f, 0.10f, 0.08f));
+        barFill.Position = new Vector3(0, barY, 0);
         barFill.Name = "HpBarFill";
         root.AddChild(barFill);
 
-        // Name label
-        var label = new Label3D();
-        label.Text     = unit.Name;
-        label.FontSize = 18;
-        label.Modulate = unit.Team == Team.Player ? Colors.Cyan : Colors.OrangeRed;
-        label.Position = new Vector3(0, h + 0.40f, 0);
-        label.Billboard = BaseMaterial3D.BillboardModeEnum.Enabled;
-        label.Name = "NameLabel";
-        root.AddChild(label);
+        // FIX #4: 30pt font, offset above HP bar
+        var lbl = new Label3D
+        {
+            Text      = unit.Name,
+            FontSize  = 30,
+            Modulate  = unit.Team == Team.Player ? Colors.Cyan : Colors.OrangeRed,
+            Position  = new Vector3(0, barY + 0.30f, 0),
+            Billboard = BaseMaterial3D.BillboardModeEnum.Enabled,
+            Name      = "NameLabel",
+        };
+        root.AddChild(lbl);
 
         AddChild(root);
-        _unitVis[unit.Id] = new UnitVisual(root, meshInst, barFill, label, unit);
-        SyncUnitVisualPosition(unit);
-        UpdateUnitLabel(unit);
+        _unitVis[unit.Id] = new UnitVisual(root, bodyInst, barFill, lbl, unit);
+        SyncUnitWorldPos(unit);
+        RefreshHpBar(unit);
     }
 
-    private void SyncUnitVisualPosition(Unit unit)
+    /// <summary>Tiny type indicator placed on top of the body mesh.</summary>
+    private static MeshInstance3D MakeTypeTop(UnitType type, Team team, float y)
+    {
+        // Warrior: flat square cap; Archer: small sphere; Mage: tall spike
+        Mesh mesh = type switch
+        {
+            UnitType.Warrior => new BoxMesh       { Size = new Vector3(0.22f, 0.10f, 0.22f) },
+            UnitType.Archer  => new SphereMesh    { Radius = 0.12f, Height = 0.24f },
+            UnitType.Mage    => new CylinderMesh  { TopRadius = 0.02f, BottomRadius = 0.10f, Height = 0.24f, RadialSegments = 8 },
+            _                => new SphereMesh    { Radius = 0.10f },
+        };
+
+        var inst = new MeshInstance3D { Mesh = mesh };
+        // Muted contrasting accent colour
+        inst.MaterialOverride = MakeMat(team == Team.Player ? new Color(0.9f, 0.95f, 1.0f) : new Color(1.0f, 0.9f, 0.6f));
+        inst.Position = new Vector3(0, y, 0);
+        return inst;
+    }
+
+    private static MeshInstance3D MakeBarMesh(Color c, Vector3 size)
+    {
+        var m = new BoxMesh { Size = size };
+        var inst = new MeshInstance3D { Mesh = m };
+        inst.MaterialOverride = MakeMat(c);
+        return inst;
+    }
+
+    private void SyncUnitWorldPos(Unit unit)
     {
         if (!_unitVis.TryGetValue(unit.Id, out var vis)) return;
         float wy = TileWorldY(unit.Position);
-        float h  = ((BoxMesh)vis.Mesh.Mesh).Size.Y;
         vis.Root.Position = new Vector3(
             unit.Position.X * TileSize,
             wy + TileH * 0.5f,
@@ -441,78 +464,63 @@ public sealed partial class BattleRenderer3D : Node3D, IDependenciesResolved
         );
     }
 
-    private void UpdateUnitLabel(Unit unit)
+    private void RefreshHpBar(Unit unit)
     {
         if (!_unitVis.TryGetValue(unit.Id, out var vis)) return;
-        float ratio = (float)unit.Hp / unit.MaxHp;
+        float ratio = Mathf.Clamp((float)unit.Hp / unit.MaxHp, 0f, 1f);
 
-        // Update HP bar fill scale (scale X by ratio, offset so it grows from left)
         vis.HpBarFill.Scale    = new Vector3(ratio, 1f, 1f);
-        vis.HpBarFill.Position = vis.HpBarFill.Position with { X = (ratio - 1f) * 0.4f };
+        vis.HpBarFill.Position = vis.HpBarFill.Position with { X = (ratio - 1f) * 0.36f };
 
-        // Colour: green → yellow → red
-        var barMat = (StandardMaterial3D)vis.HpBarFill.MaterialOverride;
-        barMat.AlbedoColor = ratio > 0.5f
-            ? new Color(1f - (ratio - 0.5f) * 2f, 0.9f, 0.15f)
-            : new Color(0.9f, ratio * 2f * 0.9f, 0.05f);
+        var mat = (StandardMaterial3D)vis.HpBarFill.MaterialOverride;
+        mat.AlbedoColor = ratio > 0.5f
+            ? new Color(1f - (ratio - 0.5f) * 2f, 0.88f, 0.12f)
+            : new Color(0.88f, ratio * 2f * 0.88f, 0.05f);
 
+        // FIX #4: show HP numbers in the label
         vis.Label.Text = $"{unit.Name}\n{unit.Hp}/{unit.MaxHp}";
     }
 
-    private void ShowFloatingDamage(Unit unit, int damage)
+    private void ShowFloatingDamage(Unit unit, int dmg)
     {
         if (!_unitVis.TryGetValue(unit.Id, out var vis)) return;
-
-        var fl = new Label3D();
-        fl.Text      = $"-{damage}";
-        fl.FontSize  = 24;
-        fl.Modulate  = Colors.Yellow;
-        fl.Billboard = BaseMaterial3D.BillboardModeEnum.Enabled;
-        fl.Position  = vis.Root.Position + new Vector3(0, 1.2f, 0);
+        var fl = new Label3D
+        {
+            Text      = $"-{dmg}",
+            FontSize  = 36,
+            Modulate  = Colors.Yellow,
+            Billboard = BaseMaterial3D.BillboardModeEnum.Enabled,
+            Position  = vis.Root.Position + new Vector3(0, 1.4f, 0),
+        };
         AddChild(fl);
-
-        // Remove after a short delay
-        var timer = new Timer { WaitTime = DamageShowSec, OneShot = true };
-        timer.Timeout += () => { fl.QueueFree(); timer.QueueFree(); };
-        AddChild(timer);
-        timer.Start();
+        var t = new Timer { WaitTime = DamageShowSec, OneShot = true };
+        t.Timeout += () => { fl.QueueFree(); t.QueueFree(); };
+        AddChild(t);
+        t.Start();
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────
     //  Tile highlight helpers
-    // ─────────────────────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────
 
     private void HighlightTile(Vector2I pos, Color col)
     {
-        if (!_tiles.TryGetValue(pos, out var td)) return;
-        ((StandardMaterial3D)td.Mesh.MaterialOverride).AlbedoColor = col;
+        if (_tiles.TryGetValue(pos, out var td))
+            ((StandardMaterial3D)td.Mesh.MaterialOverride).AlbedoColor = col;
     }
 
-    private void ClearHighlights(bool clearSelection)
+    /// <summary>Reset every tile to its base colour and clear lists.</summary>
+    private void ClearHighlights()
     {
-        foreach (var (pos, td) in _tiles)
+        foreach (var (_, td) in _tiles)
             ((StandardMaterial3D)td.Mesh.MaterialOverride).AlbedoColor = td.BaseColor;
         _moveTiles   = new();
         _attackUnits = new();
-        if (clearSelection) _inputState = InputState.Idle;
     }
 
-    private void RefreshHighlights()
-    {
-        if (_gameState?.SelectedUnit is { } sel)
-        {
-            ClearHighlights(clearSelection: false);
-            HighlightTile(sel.Position, ColSelected);
-            _moveTiles   = _mapService!.GetReachableTiles(sel);
-            _attackUnits = _mapService.GetAttackableTargets(sel);
-            foreach (var t in _moveTiles)   HighlightTile(t, ColMoveable);
-            foreach (var e in _attackUnits) HighlightTile(e.Position, ColAttackable);
-        }
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    //  Utility
-    // ─────────────────────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────
+    //  Utilities
+    // ─────────────────────────────────────────────────────────────────────
 
     private float TileWorldY(Vector2I gp)
     {
@@ -535,29 +543,15 @@ public sealed partial class BattleRenderer3D : Node3D, IDependenciesResolved
         _                 => ColGrass,
     };
 
-    private static StandardMaterial3D MakeMat(Color color, bool rougher = false)
+    private static StandardMaterial3D MakeMat(Color c, bool rougher = false)
     {
-        var mat = new StandardMaterial3D();
-        mat.AlbedoColor  = color;
-        mat.Roughness    = rougher ? 0.85f : 0.55f;
-        mat.Metallic     = rougher ? 0.00f : 0.10f;
-        return mat;
+        return new StandardMaterial3D { AlbedoColor = c, Roughness = rougher ? 0.85f : 0.55f, Metallic = rougher ? 0f : 0.08f };
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    //  Inner data types
-    // ─────────────────────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────
+    //  Inner record types
+    // ─────────────────────────────────────────────────────────────────────
 
-    private sealed record TileData(
-        StaticBody3D  Body,
-        MeshInstance3D Mesh,
-        StandardMaterial3D Mat,
-        Color BaseColor);
-
-    private sealed record UnitVisual(
-        Node3D Root,
-        MeshInstance3D Mesh,
-        MeshInstance3D HpBarFill,
-        Label3D Label,
-        Unit Unit);
+    private sealed record TileData(StaticBody3D Body, MeshInstance3D Mesh, StandardMaterial3D Mat, Color BaseColor);
+    private sealed record UnitVisual(Node3D Root, MeshInstance3D Mesh, MeshInstance3D HpBarFill, Label3D Label, Unit Unit);
 }

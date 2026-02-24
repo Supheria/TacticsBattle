@@ -13,30 +13,23 @@ public class GameStateService : IGameStateService
     public int CurrentTurn { get; private set; } = 1;
     public GamePhase Phase { get; private set; } = GamePhase.PlayerTurn;
 
-    public IReadOnlyList<Unit> AllUnits => _allUnits;
-    public IReadOnlyList<Unit> PlayerUnits =>
-        _allUnits.FindAll(u => u.Team == Team.Player && u.IsAlive);
-    public IReadOnlyList<Unit> EnemyUnits =>
-        _allUnits.FindAll(u => u.Team == Team.Enemy && u.IsAlive);
+    public IReadOnlyList<Unit> AllUnits    => _allUnits;
+    public IReadOnlyList<Unit> PlayerUnits => _allUnits.FindAll(u => u.Team == Team.Player && u.IsAlive);
+    public IReadOnlyList<Unit> EnemyUnits  => _allUnits.FindAll(u => u.Team == Team.Enemy  && u.IsAlive);
 
     public Unit? SelectedUnit
     {
         get => _selectedUnit;
-        set
-        {
-            _selectedUnit = value;
-            OnSelectionChanged?.Invoke(_selectedUnit);
-        }
+        set { _selectedUnit = value; OnSelectionChanged?.Invoke(_selectedUnit); }
     }
 
     public event Action<GamePhase>? OnPhaseChanged;
-    public event Action<int>? OnTurnStarted;
-    public event Action<Unit?>? OnSelectionChanged;
-    public event Action<Unit>? OnUnitMoved;
+    public event Action<int>?       OnTurnStarted;
+    public event Action<Unit?>?     OnSelectionChanged;
+    public event Action<Unit>?      OnUnitMoved;
 
-    public void AddUnit(Unit unit) => _allUnits.Add(unit);
+    public void AddUnit(Unit unit)    => _allUnits.Add(unit);
     public void RemoveUnit(Unit unit) => _allUnits.Remove(unit);
-
     public void NotifyUnitMoved(Unit unit) => OnUnitMoved?.Invoke(unit);
 
     public void BeginPlayerTurn()
@@ -58,13 +51,8 @@ public class GameStateService : IGameStateService
 
     public void EndTurn()
     {
-        if (Phase == GamePhase.PlayerTurn)
-            BeginEnemyTurn();
-        else if (Phase == GamePhase.EnemyTurn)
-        {
-            CurrentTurn++;
-            BeginPlayerTurn();
-        }
+        if (Phase == GamePhase.PlayerTurn) BeginEnemyTurn();
+        else if (Phase == GamePhase.EnemyTurn) { CurrentTurn++; BeginPlayerTurn(); }
     }
 
     public void CheckVictoryCondition()

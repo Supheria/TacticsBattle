@@ -6,10 +6,6 @@ using TacticsBattle.Services;
 
 namespace TacticsBattle.Users;
 
-/// <summary>
-/// DI User: injects all three services, spawns the initial unit set,
-/// and exposes move/attack helpers for BattleRenderer3D.
-/// </summary>
 [User]
 public sealed partial class UnitManager : Node, IDependenciesResolved
 {
@@ -22,39 +18,24 @@ public sealed partial class UnitManager : Node, IDependenciesResolved
 
     public override partial void _Notification(int what);
 
-    public override void _Ready()
-    {
-        GD.Print("[UnitManager] _Ready — waiting for DI...");
-    }
+    public override void _Ready() => GD.Print("[UnitManager] _Ready — waiting for DI...");
 
-    void IDependenciesResolved.OnDependenciesResolved(bool isAllDependenciesReady)
+    void IDependenciesResolved.OnDependenciesResolved(bool ok)
     {
-        if (!isAllDependenciesReady)
-        {
-            GD.PrintErr("[UnitManager] Dependency injection FAILED — cannot spawn units.");
-            return;
-        }
-
+        if (!ok) { GD.PrintErr("[UnitManager] DI FAILED."); return; }
         GD.Print("[UnitManager] DI ready — spawning units.");
         SpawnInitialUnits();
         SubscribeEvents();
     }
 
-    // ──────────────────────────────────────────────────────
-    //  Spawning
-    // ──────────────────────────────────────────────────────
     private void SpawnInitialUnits()
     {
-        // Player units (bottom rows)
-        SpawnUnit("Arthur",  UnitType.Warrior, Team.Player, new Vector2I(1, 6));
-        SpawnUnit("Lyra",    UnitType.Archer,  Team.Player, new Vector2I(3, 7));
-        SpawnUnit("Merlin",  UnitType.Mage,    Team.Player, new Vector2I(5, 6));
-
-        // Enemy units (top rows)
-        SpawnUnit("Orc A",   UnitType.Warrior, Team.Enemy,  new Vector2I(2, 1));
-        SpawnUnit("Orc B",   UnitType.Warrior, Team.Enemy,  new Vector2I(5, 0));
-        SpawnUnit("Goblin",  UnitType.Archer,  Team.Enemy,  new Vector2I(4, 2));
-
+        SpawnUnit("Arthur", UnitType.Warrior, Team.Player, new Vector2I(1, 6));
+        SpawnUnit("Lyra",   UnitType.Archer,  Team.Player, new Vector2I(3, 7));
+        SpawnUnit("Merlin", UnitType.Mage,    Team.Player, new Vector2I(5, 6));
+        SpawnUnit("Orc A",  UnitType.Warrior, Team.Enemy,  new Vector2I(2, 1));
+        SpawnUnit("Orc B",  UnitType.Warrior, Team.Enemy,  new Vector2I(5, 0));
+        SpawnUnit("Goblin", UnitType.Archer,  Team.Enemy,  new Vector2I(4, 2));
         _gameState!.BeginPlayerTurn();
     }
 
@@ -70,31 +51,24 @@ public sealed partial class UnitManager : Node, IDependenciesResolved
 
     private void SubscribeEvents()
     {
-        _battleService!.OnUnitDefeated += unit =>
-            GD.Print($"[UnitManager] Unit defeated: {unit.Name}");
-
-        _battleService.OnEnemyTurnFinished += () =>
-            GD.Print("[UnitManager] Enemy turn finished — player may now act.");
+        _battleService!.OnUnitDefeated     += u  => GD.Print($"[UnitManager] Defeated: {u.Name}");
+        _battleService.OnEnemyTurnFinished += ()  => GD.Print("[UnitManager] Enemy done.");
     }
 
-    // ──────────────────────────────────────────────────────
-    //  Public helpers called by BattleRenderer3D
-    // ──────────────────────────────────────────────────────
+    // ── Public helpers called by BattleRenderer3D ──────────────────────────
 
-    /// <summary>Move selected unit to target tile. Returns true if successful.</summary>
     public bool TryMoveSelected(Vector2I target)
     {
         if (_gameState?.SelectedUnit is not { } unit) return false;
         if (unit.Team != Team.Player || unit.HasMoved) return false;
-        var reachable = _mapService!.GetReachableTiles(unit);
-        if (!reachable.Contains(target)) return false;
+        if (!_mapService!.GetReachableTiles(unit).Contains(target)) return false;
+
         _mapService.MoveUnit(unit, target);
-        _gameState.NotifyUnitMoved(unit);
+        _gameState.NotifyUnitMoved(unit);   // fires OnUnitMoved → renderer syncs 3D position
         GD.Print($"[UnitManager] Moved {unit.Name} to {target}");
         return true;
     }
 
-    /// <summary>Attack a specific enemy unit using the selected player unit.</summary>
     public bool TryAttackTarget(Unit target)
     {
         if (_gameState?.SelectedUnit is not { } attacker) return false;

@@ -25,12 +25,11 @@ public interface IGameStateService
     void EndTurn();
     void CheckVictoryCondition();
 
-    /// <summary>Notify listeners that a unit has moved to a new grid position.</summary>
+    /// <summary>Notify 3D renderer that a unit has moved.</summary>
     void NotifyUnitMoved(Unit unit);
 
-    event Action<GamePhase> OnPhaseChanged;
-    event Action<int> OnTurnStarted;
-    event Action<Unit?> OnSelectionChanged;
-    /// <summary>Fired after a unit's Position has been updated by the map service.</summary>
-    event Action<Unit> OnUnitMoved;
+    event Action<GamePhase>  OnPhaseChanged;
+    event Action<int>        OnTurnStarted;
+    event Action<Unit?>      OnSelectionChanged;
+    event Action<Unit>       OnUnitMoved;
 }
