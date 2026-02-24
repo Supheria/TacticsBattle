@@ -7,8 +7,8 @@ using TacticsBattle.Services;
 namespace TacticsBattle.Users;
 
 /// <summary>
-/// DI User: injects all three services, then spawns the initial unit set
-/// and wires map/game-state events.
+/// DI User: injects all three services, spawns the initial unit set,
+/// and exposes move/attack helpers for BattleRenderer3D.
 /// </summary>
 [User]
 public sealed partial class UnitManager : Node, IDependenciesResolved
@@ -55,7 +55,6 @@ public sealed partial class UnitManager : Node, IDependenciesResolved
         SpawnUnit("Orc B",   UnitType.Warrior, Team.Enemy,  new Vector2I(5, 0));
         SpawnUnit("Goblin",  UnitType.Archer,  Team.Enemy,  new Vector2I(4, 2));
 
-        // Start first player turn
         _gameState!.BeginPlayerTurn();
     }
 
@@ -69,9 +68,6 @@ public sealed partial class UnitManager : Node, IDependenciesResolved
         return unit;
     }
 
-    // ──────────────────────────────────────────────────────
-    //  Event subscriptions
-    // ──────────────────────────────────────────────────────
     private void SubscribeEvents()
     {
         _battleService!.OnUnitDefeated += unit =>
@@ -82,10 +78,10 @@ public sealed partial class UnitManager : Node, IDependenciesResolved
     }
 
     // ──────────────────────────────────────────────────────
-    //  Public helpers called by BattleUI
+    //  Public helpers called by BattleRenderer3D
     // ──────────────────────────────────────────────────────
 
-    /// <summary>Move selected unit to target tile.</summary>
+    /// <summary>Move selected unit to target tile. Returns true if successful.</summary>
     public bool TryMoveSelected(Vector2I target)
     {
         if (_gameState?.SelectedUnit is not { } unit) return false;
@@ -93,6 +89,7 @@ public sealed partial class UnitManager : Node, IDependenciesResolved
         var reachable = _mapService!.GetReachableTiles(unit);
         if (!reachable.Contains(target)) return false;
         _mapService.MoveUnit(unit, target);
+        _gameState.NotifyUnitMoved(unit);
         GD.Print($"[UnitManager] Moved {unit.Name} to {target}");
         return true;
     }

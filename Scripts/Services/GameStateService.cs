@@ -32,9 +32,12 @@ public class GameStateService : IGameStateService
     public event Action<GamePhase>? OnPhaseChanged;
     public event Action<int>? OnTurnStarted;
     public event Action<Unit?>? OnSelectionChanged;
+    public event Action<Unit>? OnUnitMoved;
 
     public void AddUnit(Unit unit) => _allUnits.Add(unit);
     public void RemoveUnit(Unit unit) => _allUnits.Remove(unit);
+
+    public void NotifyUnitMoved(Unit unit) => OnUnitMoved?.Invoke(unit);
 
     public void BeginPlayerTurn()
     {
@@ -56,9 +59,7 @@ public class GameStateService : IGameStateService
     public void EndTurn()
     {
         if (Phase == GamePhase.PlayerTurn)
-        {
             BeginEnemyTurn();
-        }
         else if (Phase == GamePhase.EnemyTurn)
         {
             CurrentTurn++;
